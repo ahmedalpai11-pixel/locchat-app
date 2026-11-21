@@ -1,0 +1,6 @@
+{
+  "name": "LocChat",
+  "description": "Offline Bluetooth LE Mesh chat, channels, and neighborhood feed with end-to-end encryption.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

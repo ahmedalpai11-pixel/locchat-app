@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LocChat</string>
+    <string name="mesh_notification_channel_name">LocChat Local Mesh Service</string>
+    <string name="mesh_notification_channel_desc">Keeps BLE Mesh active to receive and relay nearby offline messages</string>
+    <string name="mesh_service_title">LocChat Mesh Active</string>
+    <string name="mesh_service_text">Scanning for nearby peers and relaying encrypted packets</string>
+    <string name="welcome_title">Welcome to LocChat</string>
+    <string name="permissions_rationale">LocChat needs Bluetooth, Location, and Notification permissions to discover nearby devices and exchange encrypted messages offline.</string>
+    <string name="grant_permissions_button">Grant Permissions &amp; Use Bluetooth</string>
+    <string name="bluetooth_off_message">Bluetooth is currently off. Please turn on Bluetooth to join the local mesh network.</string>
+    <string name="enable_bluetooth_button">Enable Bluetooth</string>
+    <string name="location_off_message">On this Android version, Location Service (GPS) must be enabled so the system allows BLE scanning.</string>
+    <string name="enable_location_button">Enable Location Service</string>
+</resources>

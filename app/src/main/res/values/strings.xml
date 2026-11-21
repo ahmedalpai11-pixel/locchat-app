@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">LocChat</string>
+    <string name="mesh_notification_channel_name">خدمة شبكة LocChat المحلية</string>
+    <string name="mesh_notification_channel_desc">يبقي اتصال البلوتوث الشبكي نشطاً لاستقبال وإعادة توجيه الرسائل القريبة بدون إنترنت</string>
+    <string name="mesh_service_title">LocChat Mesh نشط</string>
+    <string name="mesh_service_text">البحث عن الأجهزة القريبة وتمرير الرسائل المشفرة</string>
+    <string name="welcome_title">مرحباً بك في LocChat</string>
+    <string name="permissions_rationale">يحتاج LocChat إلى إذن البلوتوث والموقع والإشعارات لكي يكتشف الأجهزة القريبة ويرسل الرسائل والصور بدون إنترنت.</string>
+    <string name="grant_permissions_button">منح الإذن واستخدام البلوتوث</string>
+    <string name="bluetooth_off_message">البلوتوث مغلق حالياً. يرجى تشغيل البلوتوث لبدء الاتصال بالشبكة المحلية.</string>
+    <string name="enable_bluetooth_button">تشغيل البلوتوث</string>
+    <string name="location_off_message">في إصدار أندرويد الحالي يجب تشغيل خدمة الموقع (GPS) من الإعدادات ليسمح النظام بالبحث عن أجهزة البلوتوث القريبة.</string>
+    <string name="enable_location_button">تفعيل خدمة الموقع</string>
+</resources>

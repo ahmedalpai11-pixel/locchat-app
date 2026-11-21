@@ -1,10 +1,12 @@
 name: Build APK
 
 on:
-  workflow_dispatch:
+  # Build pushes to any branch so the APK can be tested before merging to main.
   push:
+  pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,14 +25,32 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      # This repository does not include gradlew, so install Gradle directly.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      # app/build.gradle.kts uses this local debug keystore for the debug APK.
+      - name: Create debug signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug
+        run: gradle --no-daemon :app:assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: locchat-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7

@@ -37,7 +37,7 @@ class CryptoManager(context: Context) {
         if (existingEdPriv != null && existingEdPub != null &&
             existingXPriv != null && existingXPub != null && createdAt > 0L
         ) {
-            // Upgrade legacy plain private keys into Android Keystore wrapping on real devices
+            // Upgrade legacy plain private keys into Android Keystore wrapping on real devices.
             if (!KeystoreKeyWrapper.isWrappedWithKeystore(existingEdPriv)) {
                 KeystoreKeyWrapper.unwrapPrivateKey(existingEdPriv)?.let { rawEd ->
                     val wrapped = KeystoreKeyWrapper.wrapPrivateKey(rawEd)
@@ -70,49 +70,37 @@ class CryptoManager(context: Context) {
         return generateNewIdentity(savedNickname)
     }
 
-    fun isKeystoreProtected(): Boolean {
-        return KeystoreKeyWrapper.isWrappedWithKeystore(prefs.getString(KEY_ED_PRIV_B64, null))
-    }
+    fun isKeystoreProtected(): Boolean =
+        KeystoreKeyWrapper.isWrappedWithKeystore(prefs.getString(KEY_ED_PRIV_B64, null))
 
-    fun isNicknameConfigured(): Boolean {
-        return prefs.getBoolean(KEY_NICKNAME_CONFIGURED, false)
-    }
+    fun isNicknameConfigured(): Boolean = prefs.getBoolean(KEY_NICKNAME_CONFIGURED, false)
 
-    fun isBiometricLockEnabled(): Boolean {
-        return prefs.getBoolean(KEY_BIOMETRIC_LOCK, false)
-    }
+    fun isBiometricLockEnabled(): Boolean = prefs.getBoolean(KEY_BIOMETRIC_LOCK, false)
 
     fun setBiometricLockEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_BIOMETRIC_LOCK, enabled).apply()
     }
 
-    fun isStealthModeEnabled(): Boolean {
-        return prefs.getBoolean(KEY_STEALTH_MODE, false)
-    }
+    fun isStealthModeEnabled(): Boolean = prefs.getBoolean(KEY_STEALTH_MODE, false)
 
     fun setStealthModeEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_STEALTH_MODE, enabled).apply()
     }
 
-    fun isAutoApplyTrustedBlocksEnabled(): Boolean {
-        return prefs.getBoolean(KEY_AUTO_TRUSTED_BLOCKS, true)
-    }
+    fun isAutoApplyTrustedBlocksEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_TRUSTED_BLOCKS, true)
 
     fun setAutoApplyTrustedBlocksEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_TRUSTED_BLOCKS, enabled).apply()
     }
 
-    fun getMaxHopTtl(): Int {
-        return prefs.getInt(KEY_MAX_HOP_TTL, 7).coerceIn(1, 7)
-    }
+    fun getMaxHopTtl(): Int = prefs.getInt(KEY_MAX_HOP_TTL, 7).coerceIn(1, 7)
 
     fun setMaxHopTtl(hops: Int) {
         prefs.edit().putInt(KEY_MAX_HOP_TTL, hops.coerceIn(1, 7)).apply()
     }
 
-    fun getLanguage(): AppLanguage {
-        return AppLanguage.fromCode(prefs.getString(KEY_LANGUAGE_CODE, AppLanguage.ARABIC.code))
-    }
+    fun getLanguage(): AppLanguage =
+        AppLanguage.fromCode(prefs.getString(KEY_LANGUAGE_CODE, AppLanguage.ARABIC.code))
 
     fun setLanguage(language: AppLanguage) {
         prefs.edit().putString(KEY_LANGUAGE_CODE, language.code).apply()
@@ -148,15 +136,13 @@ class CryptoManager(context: Context) {
         return Base64.encodeToString(signer.generateSignature(), Base64.NO_WRAP)
     }
 
-    fun verifyNodeIdMatchesPublicKey(claimedNodeId: String, publicKeyHex: String): Boolean {
-        return try {
-            if (publicKeyHex.length != 64) return false
-            val pubBytes = hexToBytes(publicKeyHex)
-            if (pubBytes.size != 32) return false
-            deriveNodeId(pubBytes).equals(claimedNodeId.trim(), ignoreCase = true)
-        } catch (_: Exception) {
-            false
-        }
+    fun verifyNodeIdMatchesPublicKey(claimedNodeId: String, publicKeyHex: String): Boolean = try {
+        if (publicKeyHex.length != 64) return false
+        val pubBytes = hexToBytes(publicKeyHex)
+        if (pubBytes.size != 32) return false
+        deriveNodeId(pubBytes).equals(claimedNodeId.trim(), ignoreCase = true)
+    } catch (_: Exception) {
+        false
     }
 
     fun verifyPacketIdentityAndSignature(
@@ -164,44 +150,38 @@ class CryptoManager(context: Context) {
         publicKeyHex: String,
         data: ByteArray,
         signatureB64: String
-    ): Boolean {
-        return try {
-            if (publicKeyHex.length != 64 || signatureB64.isBlank()) return false
-            val pubBytes = hexToBytes(publicKeyHex)
-            if (pubBytes.size != 32) return false
-            // Cryptographically bind senderId to Ed25519 public key to block impersonation
-            if (!deriveNodeId(pubBytes).equals(claimedSenderId, ignoreCase = true)) return false
+    ): Boolean = try {
+        if (publicKeyHex.length != 64 || signatureB64.isBlank()) return false
+        val pubBytes = hexToBytes(publicKeyHex)
+        if (pubBytes.size != 32) return false
+        if (!deriveNodeId(pubBytes).equals(claimedSenderId, ignoreCase = true)) return false
 
-            val sigBytes = Base64.decode(signatureB64, Base64.NO_WRAP)
-            val pubKey = Ed25519PublicKeyParameters(pubBytes, 0)
-            val verifier = Ed25519Signer()
-            verifier.init(false, pubKey)
-            verifier.update(data, 0, data.size)
-            verifier.verifySignature(sigBytes)
-        } catch (_: Exception) {
-            false
-        }
+        val sigBytes = Base64.decode(signatureB64, Base64.NO_WRAP)
+        val pubKey = Ed25519PublicKeyParameters(pubBytes, 0)
+        val verifier = Ed25519Signer()
+        verifier.init(false, pubKey)
+        verifier.update(data, 0, data.size)
+        verifier.verifySignature(sigBytes)
+    } catch (_: Exception) {
+        false
     }
 
-    fun deriveDirectKeyWithPeer(peerX25519PubHex: String): ByteArray? {
-        return try {
-            if (peerX25519PubHex.length != 64) return null
-            val wrappedPriv = prefs.getString(KEY_X_PRIV_B64, null) ?: return null
-            val privBytes = KeystoreKeyWrapper.unwrapPrivateKey(wrappedPriv) ?: return null
-            val myPriv = X25519PrivateKeyParameters(privBytes, 0)
-            val peerPub = X25519PublicKeyParameters(hexToBytes(peerX25519PubHex), 0)
-            val agreement = X25519Agreement()
-            agreement.init(myPriv)
-            val secret = ByteArray(agreement.agreementSize)
-            agreement.calculateAgreement(peerPub, secret, 0)
-            // Reject all-zero low-order X25519 points
-            if (secret.all { it == 0.toByte() }) return null
-            MessageDigest.getInstance("SHA-256").digest(
-                "LOCCHAT_ECDH_V1:".toByteArray(Charsets.UTF_8) + secret
-            )
-        } catch (_: Exception) {
-            null
-        }
+    fun deriveDirectKeyWithPeer(peerX25519PubHex: String): ByteArray? = try {
+        if (peerX25519PubHex.length != 64) return null
+        val wrappedPriv = prefs.getString(KEY_X_PRIV_B64, null) ?: return null
+        val privBytes = KeystoreKeyWrapper.unwrapPrivateKey(wrappedPriv) ?: return null
+        val myPriv = X25519PrivateKeyParameters(privBytes, 0)
+        val peerPub = X25519PublicKeyParameters(hexToBytes(peerX25519PubHex), 0)
+        val agreement = X25519Agreement()
+        agreement.init(myPriv)
+        val secret = ByteArray(agreement.agreementSize)
+        agreement.calculateAgreement(peerPub, secret, 0)
+        if (secret.all { it == 0.toByte() }) return null
+        MessageDigest.getInstance("SHA-256").digest(
+            "LOCCHAT_ECDH_V1:".toByteArray(Charsets.UTF_8) + secret
+        )
+    } catch (_: Exception) {
+        null
     }
 
     fun deriveChannelKey(channelId: String, passphrase: String): ByteArray {
@@ -220,6 +200,7 @@ class CryptoManager(context: Context) {
         }
     }
 
+    /** Encrypts or fails closed. Never return plaintext as an encryption fallback. */
     fun encryptTextWithKey(
         keyBytes: ByteArray,
         plaintext: String,
@@ -228,8 +209,8 @@ class CryptoManager(context: Context) {
         return try {
             val padded = padPkcs7(plaintext.toByteArray(Charsets.UTF_8), 32)
             AesGcmCryptoHelper.encrypt(keyBytes, padded, associatedData)
-        } catch (_: Exception) {
-            plaintext
+        } catch (e: Exception) {
+            throw IllegalStateException("Message encryption failed; refusing to send plaintext", e)
         }
     }
 
@@ -285,23 +266,19 @@ class CryptoManager(context: Context) {
         )
     }
 
-    fun formatFingerprintFromHex(edPubHex: String, xPubHex: String = ""): String {
-        return try {
-            val ed = hexToBytes(edPubHex)
-            val x = if (xPubHex.isNotBlank()) hexToBytes(xPubHex) else ByteArray(0)
-            formatFingerprint(ed, x)
-        } catch (_: Exception) {
-            edPubHex.take(16).uppercase()
-        }
+    fun formatFingerprintFromHex(edPubHex: String, xPubHex: String = ""): String = try {
+        val ed = hexToBytes(edPubHex)
+        val x = if (xPubHex.isNotBlank()) hexToBytes(xPubHex) else ByteArray(0)
+        formatFingerprint(ed, x)
+    } catch (_: Exception) {
+        edPubHex.take(16).uppercase()
     }
 
     private fun padPkcs7(data: ByteArray, blockSize: Int): ByteArray {
         val padLen = blockSize - (data.size % blockSize)
         val out = ByteArray(data.size + padLen)
         System.arraycopy(data, 0, out, 0, data.size)
-        for (i in data.size until out.size) {
-            out[i] = padLen.toByte()
-        }
+        for (i in data.size until out.size) out[i] = padLen.toByte()
         return out
     }
 
@@ -335,6 +312,7 @@ class CryptoManager(context: Context) {
 
     private fun hexToBytes(hex: String): ByteArray {
         val clean = hex.trim()
+        require(clean.length % 2 == 0) { "Hex string must have an even length" }
         return ByteArray(clean.length / 2) { i ->
             clean.substring(i * 2, i * 2 + 2).toInt(16).toByte()
         }

@@ -1,5 +1,6 @@
 package com.example.mesh
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -7,7 +8,7 @@ import java.util.UUID
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
-enum class MeshPacketType {
+ enum class MeshPacketType {
     PEER_HELLO,
     NODE_ANNOUNCE,
     CHAT_TEXT,
@@ -39,6 +40,8 @@ data class MeshPacket(
 object MeshPacketCodec {
 
     private const val FRAME_MAGIC = "LM1:"
+    private const val MAX_FRAME_CHARS = 1_500_000
+    private const val MAX_DECODED_FRAME_BYTES = 1_000_000
 
     fun encodeFrame(packet: MeshPacket): ByteArray {
         val obj = JSONObject().apply {
@@ -69,6 +72,7 @@ object MeshPacketCodec {
 
     fun decodeFrame(rawFrame: String): MeshPacket? {
         return try {
+            if (rawFrame.length > MAX_FRAME_CHARS) return null
             val trimmed = rawFrame.trim()
             if (trimmed.isEmpty()) return null
             val jsonStr = if (trimmed.startsWith(FRAME_MAGIC)) {
@@ -77,12 +81,24 @@ object MeshPacketCodec {
                 val flag = body[0]
                 val decoded = android.util.Base64.decode(body.substring(1), android.util.Base64.NO_WRAP)
                 val rawBytes = if (flag == 'Z') {
-                    GZIPInputStream(ByteArrayInputStream(decoded)).use { it.readBytes() }
+                    GZIPInputStream(ByteArrayInputStream(decoded)).use { gzip ->
+                        val output = ByteArrayOutputStream()
+                        val buffer = ByteArray(8192)
+                        while (true) {
+                            val count = gzip.read(buffer)
+                            if (count < 0) break
+                            if (output.size() + count > MAX_DECODED_FRAME_BYTES) return null
+                            output.write(buffer, 0, count)
+                        }
+                        output.toByteArray()
+                    }
                 } else {
+                    if (flag != 'R' || decoded.size > MAX_DECODED_FRAME_BYTES) return null
                     decoded
                 }
                 String(rawBytes, Charsets.UTF_8)
             } else {
+                if (trimmed.toByteArray(Charsets.UTF_8).size > MAX_DECODED_FRAME_BYTES) return null
                 trimmed
             }
 
@@ -108,10 +124,23 @@ object MeshPacketCodec {
     }
 
     /**
-     * Pure JVM-safe encoding/decoding helper for unit tests without android.util.Base64 dependency.
+     * Canonical signature input for all immutable packet fields. ttl/hopCount are omitted
+     * because mesh relays legitimately decrement/increment them while forwarding a packet.
+     * JSON array encoding avoids delimiter ambiguity in attacker-controlled strings.
      */
     fun signingBytes(packet: MeshPacket): ByteArray {
-        return "${packet.packetId}|${packet.type.name}|${packet.senderId}|${packet.senderX25519KeyHex}|${packet.targetId}|${packet.payload}|${packet.timestamp}"
-            .toByteArray(Charsets.UTF_8)
+        val canonical = JSONArray().apply {
+            put(packet.packetId)
+            put(packet.type.name)
+            put(packet.senderId)
+            put(packet.senderName)
+            put(packet.senderPubKeyHex)
+            put(packet.senderX25519KeyHex)
+            put(packet.targetId)
+            put(packet.isChannel)
+            put(packet.payload)
+            put(packet.timestamp)
+        }
+        return canonical.toString().toByteArray(Charsets.UTF_8)
     }
 }

@@ -13,6 +13,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
@@ -51,26 +52,41 @@ class MeshForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                )
-            } catch (_: Exception) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    )
+                } catch (_: Exception) {
+                    // The connected-device type is not available on every device/OS combination.
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            // A foreground-service failure must not terminate the host app (notably on older OEM
+            // Android builds). Do not start BLE work unless Android accepted the foreground state.
+            Log.e(TAG, "Could not promote mesh service to foreground", e)
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
 
-        MeshRepository.getInstance(applicationContext).startMeshEngine()
+        try {
+            MeshRepository.getInstance(applicationContext).startMeshEngine()
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not start BLE mesh engine", e)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         if (btReceiverRegistered) {
             try {
                 unregisterReceiver(bluetoothStateReceiver)
@@ -78,7 +94,12 @@ class MeshForegroundService : Service() {
             }
             btReceiverRegistered = false
         }
-        MeshRepository.getInstance(applicationContext).stopMeshEngine()
+        try {
+            MeshRepository.getInstance(applicationContext).stopMeshEngine()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error while stopping BLE mesh engine", e)
+        }
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -120,15 +141,22 @@ class MeshForegroundService : Service() {
     }
 
     companion object {
+        private const val TAG = "LocChatMeshService"
         private const val CHANNEL_ID = "locchat_mesh_channel"
         private const val NOTIFICATION_ID = 4102
 
         fun start(context: Context) {
             val intent = Intent(context, MeshForegroundService::class.java)
             try {
-                ContextCompat.startForegroundService(context, intent)
-            } catch (_: Exception) {
-                context.startService(intent)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ContextCompat.startForegroundService(context, intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                // Do not retry with startService() on Android 8+, where background-service
+                // restrictions make that fallback fail with another IllegalStateException.
+                Log.e(TAG, "Unable to request mesh foreground service", e)
             }
         }
 

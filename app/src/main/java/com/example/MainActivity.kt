@@ -17,6 +17,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material3.*
@@ -158,7 +160,7 @@ private fun LocChatRootContent(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        hasPermissions = results.values.all { it }
+        hasPermissions = results.keys.all { results[it] == true }
         isLocationEnabled = checkLocationEnabledForBle(context)
         isBluetoothOn = checkBluetoothEnabled(context)
     }
@@ -179,15 +181,13 @@ private fun LocChatRootContent(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .safeDrawingPadding()
                     .padding(28.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                LocChatSquircleLogo(
-                    size = 112.dp,
-                    showAmbientGlow = true
-                )
+                LocChatSquircleLogo(size = 112.dp, showAmbientGlow = true)
                 Spacer(modifier = Modifier.height(16.dp))
                 LocChatWordmark(fontSize = 34.sp)
                 Spacer(modifier = Modifier.height(10.dp))
@@ -217,13 +217,12 @@ private fun LocChatRootContent(
                             Text(stringResource(R.string.grant_permissions_button))
                         }
                     }
-
                     !isBluetoothOn -> {
                         Text(
                             text = if (hasBluetoothAdapter) {
                                 stringResource(R.string.bluetooth_off_message)
                             } else {
-                                "لم يتم اكتشاف محول بلوتوث في هذا الجهاز (أو المحاكي). يمكنك المتابعة في وضع المعاينة المحلية."
+                                "لم يتم اكتشاف محول بلوتوث في هذا الجهاز. يمكنك المتابع�� في وضع المعاينة المحلية."
                             },
                             textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.bodyLarge
@@ -231,16 +230,13 @@ private fun LocChatRootContent(
                         Spacer(modifier = Modifier.height(20.dp))
                         if (hasBluetoothAdapter) {
                             Button(
-                                onClick = {
-                                    enableBtLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
-                                },
+                                onClick = { enableBtLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) },
                                 modifier = Modifier.testTag("enable_bluetooth_button")
                             ) {
                                 Text(stringResource(R.string.enable_bluetooth_button))
                             }
                         }
                     }
-
                     !isLocationEnabled -> {
                         Text(
                             text = stringResource(R.string.location_off_message),
@@ -249,9 +245,7 @@ private fun LocChatRootContent(
                         )
                         Spacer(modifier = Modifier.height(20.dp))
                         Button(
-                            onClick = {
-                                activity.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                            },
+                            onClick = { activity.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) },
                             modifier = Modifier.testTag("enable_location_button")
                         ) {
                             Text(stringResource(R.string.enable_location_button))
@@ -332,6 +326,7 @@ private fun LocChatRootContent(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .safeDrawingPadding()
                     .padding(28.dp),
                 verticalArrangement = Arrangement.Center,
@@ -382,9 +377,7 @@ private fun LocChatRootContent(
             suggestedNodeId = identity.nodeId,
             currentLanguage = appLanguage,
             onSelectLanguage = { repository.setLanguage(it) },
-            onConfirmNickname = { chosenName ->
-                repository.updateNickname(chosenName)
-            }
+            onConfirmNickname = { chosenName -> repository.updateNickname(chosenName) }
         )
         return
     }
@@ -464,30 +457,18 @@ private fun LocChatRootContent(
                 onVerifyFriend = { peerId, nickname, fingerprint, pubKeyHex, x25519KeyHex ->
                     repository.verifyFriend(peerId, nickname, fingerprint, pubKeyHex, x25519KeyHex)
                 },
-                onRemoveFriend = { peerId ->
-                    repository.removeFriend(peerId)
-                },
-                onBlockPeer = { peerId, nickname ->
-                    repository.blockPeer(peerId, nickname)
-                },
+                onRemoveFriend = { peerId -> repository.removeFriend(peerId) },
+                onBlockPeer = { peerId, nickname -> repository.blockPeer(peerId, nickname) },
                 onBlockAndBroadcastPeer = { peerId, nickname, reason ->
                     repository.blockAndBroadcastPeer(peerId, nickname, reason)
                 },
                 onBroadcastExistingBlock = { blocked ->
                     repository.broadcastBlockForPeer(blocked.peerId, blocked.nickname)
                 },
-                onAcceptBlockReport = { report ->
-                    repository.acceptBlockReport(report)
-                },
-                onDismissBlockReport = { reportId ->
-                    repository.dismissBlockReport(reportId)
-                },
-                onUnblockPeer = { peerId ->
-                    repository.unblockPeer(peerId)
-                },
-                onChangePowerMode = { mode ->
-                    repository.setMeshPowerMode(mode)
-                },
+                onAcceptBlockReport = { report -> repository.acceptBlockReport(report) },
+                onDismissBlockReport = { reportId -> repository.dismissBlockReport(reportId) },
+                onUnblockPeer = { peerId -> repository.unblockPeer(peerId) },
+                onChangePowerMode = { mode -> repository.setMeshPowerMode(mode) },
                 onFriendVerified = { contactsRefreshTick++ },
                 onPanicWipe = {
                     val executeWipe: () -> Unit = {
@@ -529,9 +510,7 @@ private fun LocChatRootContent(
             onReactToMessage = { msgId, emoji ->
                 repository.sendMessageReaction(activeChat.id, activeChat.isChannel, msgId, emoji)
             },
-            onBlockPeerOnly = { peerId, nickname ->
-                repository.blockPeer(peerId, nickname)
-            },
+            onBlockPeerOnly = { peerId, nickname -> repository.blockPeer(peerId, nickname) },
             onBlockAndBroadcastPeer = { peerId, nickname, reason ->
                 repository.blockAndBroadcastPeer(peerId, nickname, reason)
             }
@@ -548,6 +527,7 @@ private fun NicknameOnboardingScreen(
 ) {
     val s = LocalAppStrings.current
     var nameInput by remember { mutableStateOf("") }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -555,9 +535,10 @@ private fun NicknameOnboardingScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
                 .safeDrawingPadding()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
+                .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             LocChatSquircleLogo(

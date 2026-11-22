@@ -202,6 +202,7 @@ fun QrScannerDialog(
         )
     }
     var cameraError by remember { mutableStateOf<String?>(null) }
+    val cameraStartError = LocalAppStrings.current.cameraStartError
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -217,9 +218,15 @@ fun QrScannerDialog(
 
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
     val detected = remember { AtomicBoolean(false) }
+    val cameraProviderRef = remember { arrayOfNulls<ProcessCameraProvider>(1) }
 
     DisposableEffect(Unit) {
         onDispose {
+            // FIX: كانت الكاميرا تبقى مفتوحة بعد إغلاق النافذة (مرتبطة بدورة حياة النشاط)
+            try {
+                cameraProviderRef[0]?.unbindAll()
+            } catch (_: Exception) {
+            }
             analyzerExecutor.shutdown()
         }
     }
@@ -252,6 +259,20 @@ fun QrScannerDialog(
                     ) {
                         Text(s.grantCameraPermission)
                     }
+                    // FIX: بعد رفض الإذن مرتين لا يظهر نظام أندرويد النافذة مجددًا؛ نوفّر طريق الإعدادات
+                    TextButton(
+                        onClick = {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.fromParts("package", context.packageName, null)
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        },
+                        modifier = Modifier.testTag("open_app_settings_button")
+                    ) {
+                        Text(s.openAppSettings)
+                    }
                 } else {
                     Box(
                         modifier = Modifier
@@ -267,6 +288,7 @@ fun QrScannerDialog(
                                 cameraProviderFuture.addListener({
                                     try {
                                         val cameraProvider = cameraProviderFuture.get()
+                                        cameraProviderRef[0] = cameraProvider
                                         val preview = Preview.Builder().build().also {
                                             it.setSurfaceProvider(previewView.surfaceProvider)
                                         }
@@ -321,7 +343,7 @@ fun QrScannerDialog(
                                             analysis
                                         )
                                     } catch (e: Exception) {
-                                        cameraError = "تعذر تشغيل الكاميرا على هذا الجهاز."
+                                        cameraError = cameraStartError
                                     }
                                 }, ContextCompat.getMainExecutor(ctx))
                                 previewView

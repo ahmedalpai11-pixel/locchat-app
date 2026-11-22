@@ -7,6 +7,8 @@ import com.example.model.MeshIdentity
 import org.bouncycastle.crypto.agreement.X25519Agreement
 import org.bouncycastle.crypto.digests.SHA256Digest
 import org.bouncycastle.crypto.generators.Ed25519KeyPairGenerator
+import org.bouncycastle.crypto.generators.HKDFBytesGenerator
+import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator
 import org.bouncycastle.crypto.generators.X25519KeyPairGenerator
 import org.bouncycastle.crypto.params.Ed25519KeyGenerationParameters
@@ -121,6 +123,7 @@ class CryptoManager(context: Context) {
     @Synchronized
     fun regenerateIdentity(nickname: String? = null): MeshIdentity {
         KeystoreKeyWrapper.deleteMasterKey()
+        channelKeyCache.clear()
         prefs.edit()
             .putBoolean(KEY_NICKNAME_CONFIGURED, !nickname.isNullOrBlank())
             .putBoolean(KEY_STEALTH_MODE, false)
@@ -139,13 +142,17 @@ class CryptoManager(context: Context) {
     }
 
     fun signPayload(data: ByteArray): String {
-        val wrappedPriv = prefs.getString(KEY_ED_PRIV_B64, null) ?: return ""
-        val privBytes = KeystoreKeyWrapper.unwrapPrivateKey(wrappedPriv) ?: return ""
-        val privKey = Ed25519PrivateKeyParameters(privBytes, 0)
-        val signer = Ed25519Signer()
-        signer.init(true, privKey)
-        signer.update(data, 0, data.size)
-        return Base64.encodeToString(signer.generateSignature(), Base64.NO_WRAP)
+        return try {
+            val wrappedPriv = prefs.getString(KEY_ED_PRIV_B64, null) ?: return ""
+            val privBytes = KeystoreKeyWrapper.unwrapPrivateKey(wrappedPriv) ?: return ""
+            val privKey = Ed25519PrivateKeyParameters(privBytes, 0)
+            val signer = Ed25519Signer()
+            signer.init(true, privKey)
+            signer.update(data, 0, data.size)
+            Base64.encodeToString(signer.generateSignature(), Base64.NO_WRAP)
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     fun verifyNodeIdMatchesPublicKey(claimedNodeId: String, publicKeyHex: String): Boolean {
@@ -196,24 +203,50 @@ class CryptoManager(context: Context) {
             agreement.calculateAgreement(peerPub, secret, 0)
             // Reject all-zero low-order X25519 points
             if (secret.all { it == 0.toByte() }) return null
-            MessageDigest.getInstance("SHA-256").digest(
-                "LOCCHAT_ECDH_V1:".toByteArray(Charsets.UTF_8) + secret
+            // HKDF-SHA256 مرتبط بالمفتاحين العامّين (مرتبين) لربط المفتاح بالزوج
+            val myPub = Base64.decode(prefs.getString(KEY_X_PUB_B64, null) ?: return null, Base64.NO_WRAP)
+            val peerPubBytes = hexToBytes(peerX25519PubHex)
+            val (a, b) = if (compareBytes(myPub, peerPubBytes) <= 0) myPub to peerPubBytes else peerPubBytes to myPub
+            val hkdf = HKDFBytesGenerator(SHA256Digest())
+            hkdf.init(
+                HKDFParameters(
+                    secret,
+                    "LOCCHAT_DH_V2".toByteArray(Charsets.UTF_8),
+                    "direct-chat".toByteArray(Charsets.UTF_8) + a + b
+                )
             )
+            ByteArray(32).also { hkdf.generateBytes(it, 0, 32) }
         } catch (_: Exception) {
             null
         }
     }
 
+    private fun compareBytes(x: ByteArray, y: ByteArray): Int {
+        val n = minOf(x.size, y.size)
+        for (i in 0 until n) {
+            val d = (x[i].toInt() and 0xFF) - (y[i].toInt() and 0xFF)
+            if (d != 0) return d
+        }
+        return x.size - y.size
+    }
+
+    private val channelKeyCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+
     fun deriveChannelKey(channelId: String, passphrase: String): ByteArray {
         val cleanChannel = channelId.trim().lowercase()
         return if (passphrase.isNotEmpty()) {
+            // الاشتقاق مكلف عمدًا (210k دورة، إصدار V2)؛ نخزّن النتيجة لتجنب إعادته لكل رسالة
+            val cacheKey = cleanChannel + "\u0000" + passphrase
+            channelKeyCache[cacheKey]?.let { return it.copyOf() }
             val gen = PKCS5S2ParametersGenerator(SHA256Digest())
             gen.init(
                 passphrase.toByteArray(Charsets.UTF_8),
-                "LOCCHAT_PBKDF2:$cleanChannel".toByteArray(Charsets.UTF_8),
-                10_000
+                "LOCCHAT_PBKDF2_V2:$cleanChannel".toByteArray(Charsets.UTF_8),
+                210_000
             )
-            (gen.generateDerivedParameters(256) as KeyParameter).key
+            val derived = (gen.generateDerivedParameters(256) as KeyParameter).key
+            channelKeyCache[cacheKey] = derived.copyOf()
+            derived
         } else {
             MessageDigest.getInstance("SHA-256")
                 .digest("LOCCHAT_OPEN_CH_V1:$cleanChannel".toByteArray(Charsets.UTF_8))
@@ -225,12 +258,9 @@ class CryptoManager(context: Context) {
         plaintext: String,
         associatedData: ByteArray? = null
     ): String {
-        return try {
-            val padded = padPkcs7(plaintext.toByteArray(Charsets.UTF_8), 32)
-            AesGcmCryptoHelper.encrypt(keyBytes, padded, associatedData)
-        } catch (_: Exception) {
-            plaintext
-        }
+        // FIX (أمان): لا نعود أبدًا إلى النص الصريح عند فشل التشفير؛ نرمي استثناءً ليُلغى الإرسال.
+        val padded = padPkcs7(plaintext.toByteArray(Charsets.UTF_8), 32)
+        return AesGcmCryptoHelper.encrypt(keyBytes, padded, associatedData)
     }
 
     fun decryptTextWithKey(
@@ -317,7 +347,8 @@ class CryptoManager(context: Context) {
 
     private fun deriveNodeId(pubBytes: ByteArray): String {
         val hash = MessageDigest.getInstance("SHA-256").digest(pubBytes)
-        return "LC-" + hash.take(4).toByteArray().toHex().uppercase()
+        // 128 بت (16 بايت) بدل 64 بت لمقاومة انتحال الهوية بالقوة الغاشمة
+        return "LC-" + hash.take(16).toByteArray().toHex().uppercase()
     }
 
     private fun formatFingerprint(edPub: ByteArray, xPub: ByteArray): String {

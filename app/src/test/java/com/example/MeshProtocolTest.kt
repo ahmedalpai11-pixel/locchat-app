@@ -78,7 +78,7 @@ class MeshProtocolTest {
         )
 
         val frameBytes = MeshPacketCodec.encodeFrame(packet.copy(signature = sig))
-        val decoded = MeshPacketCodec.decodeFrame(String(frameBytes, Charsets.UTF_8))
+        val decoded = MeshPacketCodec.decodeFrame(frameBytes)
         assertNotNull(decoded)
         assertEquals(packet.packetId, decoded?.packetId)
         assertEquals(aliceId.x25519PublicKeyHex, decoded?.senderX25519KeyHex)
@@ -248,19 +248,75 @@ class MeshProtocolTest {
     }
 
     @Test
-    fun `ble node meta hides identity in stealth mode and respects 20-byte utf8 boundary`() {
-        val stealthBytes = BleMeshEngine.encodeBleNodeMeta("LC-11223344", "أحمد", stealth = true)
-        assertEquals("STEALTH", String(stealthBytes, Charsets.UTF_8))
+    fun `ble node meta hides identity in stealth mode and fits scan response`() {
+        val stealthBytes = BleMeshEngine.encodeBleNodeMeta("LC-11223344556677889900AABBCCDDEEFF", "أحمد", stealth = true)
+        assertEquals(1, stealthBytes.size)
+        assertTrue(BleMeshEngine.parseBleNodeMeta(stealthBytes)!!.stealth)
 
         val arabicLong = BleMeshEngine.encodeBleNodeMeta(
-            nodeId = "LC-11223344",
-            nickname = "عبدالرحمن الشمري",
+            nodeId = "LC-11223344556677889900AABBCCDDEEFF",
+            nickname = "عبدالرحمن الشمري الطويل جدا",
             stealth = false
         )
-        assertTrue(arabicLong.size <= 20)
-        val decoded = String(arabicLong, Charsets.UTF_8)
-        assertTrue(decoded.startsWith("LC-11223344|"))
-        assertFalse(decoded.contains('\uFFFD'))
+        assertTrue(arabicLong.size <= 27)
+        val parsed = BleMeshEngine.parseBleNodeMeta(arabicLong)
+        assertNotNull(parsed)
+        assertEquals("LC-11223344556677889900AABBCCDDEEFF", parsed!!.nodeId)
+        assertFalse(parsed.nickname.contains('\uFFFD'))
+    }
+
+    @Test
+    fun `binary codec round trips, compresses and keeps signature valid`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val crypto = CryptoManager(context)
+        val me = crypto.getOrCreateIdentity()
+        assertEquals(35, me.nodeId.length) // LC- + 32 hex = 16 بايت
+
+        val base = MeshPacket(
+            type = MeshPacketType.CHAT_TEXT,
+            senderId = me.nodeId,
+            senderName = me.nickname,
+            senderPubKeyHex = me.publicKeyHex,
+            senderX25519KeyHex = me.x25519PublicKeyHex,
+            targetId = "#عام-الحي",
+            isChannel = true,
+            payload = "مرحبا ".repeat(200)
+        )
+        val signed = base.copy(signature = crypto.signPayload(MeshPacketCodec.signingBytes(base)))
+        val bytes = MeshPacketCodec.encodeFrame(signed)
+        assertTrue(bytes.size < signed.payload.toByteArray().size) // الضغط يعمل
+        val decoded = MeshPacketCodec.decodeFrame(bytes)
+        assertNotNull(decoded)
+        assertEquals(signed.payload, decoded!!.payload)
+        assertEquals(signed.senderId, decoded.senderId)
+        assertTrue(
+            crypto.verifyPacketIdentityAndSignature(
+                decoded.senderId, decoded.senderPubKeyHex, MeshPacketCodec.signingBytes(decoded), decoded.signature
+            )
+        )
+        // تعديل الاسم أثناء الترحيل يُبطل التوقيع
+        val tampered = decoded.copy(senderName = "مزوّر")
+        assertFalse(
+            crypto.verifyPacketIdentityAndSignature(
+                tampered.senderId, tampered.senderPubKeyHex, MeshPacketCodec.signingBytes(tampered), tampered.signature
+            )
+        )
+        // رسالة مباشرة بمعرّف 8 بايت
+        val direct = signed.copy(targetId = me.nodeId, isChannel = false)
+        assertEquals(direct.targetId, MeshPacketCodec.decodeFrame(MeshPacketCodec.encodeFrame(direct))!!.targetId)
+    }
+
+    @Test
+    fun `stream frame buffer reassembles frames split across arbitrary chunks`() {
+        val f1 = ByteArray(300) { it.toByte() }
+        val f2 = ByteArray(50) { (it + 7).toByte() }
+        val stream = MeshPacketCodec.withLengthPrefix(f1) + MeshPacketCodec.withLengthPrefix(f2)
+        val buf = com.example.mesh.StreamFrameBuffer()
+        val out = mutableListOf<ByteArray>()
+        stream.toList().chunked(20).forEach { out += buf.feed(it.toByteArray()) }
+        assertEquals(2, out.size)
+        assertTrue(out[0].contentEquals(f1))
+        assertTrue(out[1].contentEquals(f2))
     }
 
     @Test
@@ -281,7 +337,7 @@ class MeshProtocolTest {
         )
         val sig = crypto.signPayload(MeshPacketCodec.signingBytes(blockPkt))
         val frame = MeshPacketCodec.encodeFrame(blockPkt.copy(signature = sig))
-        val decoded = MeshPacketCodec.decodeFrame(String(frame, Charsets.UTF_8))
+        val decoded = MeshPacketCodec.decodeFrame(frame)
         assertNotNull(decoded)
         assertEquals(MeshPacketType.BLOCK_BROADCAST, decoded?.type)
         assertTrue(
@@ -380,7 +436,7 @@ class MeshProtocolTest {
         )
         val sig = crypto.signPayload(MeshPacketCodec.signingBytes(pkt))
         val encoded = MeshPacketCodec.encodeFrame(pkt.copy(signature = sig))
-        val decoded = MeshPacketCodec.decodeFrame(String(encoded, Charsets.UTF_8))
+        val decoded = MeshPacketCodec.decodeFrame(encoded)
 
         assertNotNull(decoded)
         assertEquals(MeshPacketType.FEED_POST, decoded?.type)

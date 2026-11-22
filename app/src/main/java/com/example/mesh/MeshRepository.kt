@@ -42,7 +42,12 @@ import java.util.concurrent.ConcurrentHashMap
 
 class MeshRepository private constructor(private val context: Context) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+                android.util.Log.e("MeshRepository", "Unhandled coroutine error", e)
+            }
+    )
     private val db = LocChatDatabase.getInstance(context)
     private val cryptoManager = CryptoManager(context)
     private val mediaChunkAssembler = MediaChunkAssembler()
@@ -889,10 +894,24 @@ class MeshRepository private constructor(private val context: Context) {
     ) {
         val cleanId = peerId.trim().uppercase()
         val cleanName = nickname.trim().ifEmpty { cleanId }.take(32)
-        val cleanFp = fingerprint.trim().uppercase()
-        val resolvedXKey = x25519KeyHex.ifBlank { bleEngine.getPeerX25519Key(cleanId) ?: "" }
+        var cleanFp = fingerprint.trim().uppercase()
+        var resolvedPubKey = publicKeyHex
+        var resolvedXKey = x25519KeyHex.ifBlank { bleEngine.getPeerX25519Key(cleanId) ?: "" }
+        if (resolvedPubKey.length != 64) {
+            // FIX: الإضافة اليدوية لا تُوثَّق إلا إذا كان الجهاز ظاهرًا في الشبكة، ومفتاحه مرتبط بالمعرّف،
+            // والبصمة المكتوبة تطابق البصمة الفعلية. وإلا لا يُسجَّل أي توثيق.
+            val np = nearbyPeers.value.firstOrNull { it.peerId.equals(cleanId, ignoreCase = true) } ?: return
+            if (np.publicKeyHex.length != 64 ||
+                !cryptoManager.verifyNodeIdMatchesPublicKey(cleanId, np.publicKeyHex)
+            ) return
+            fun norm(x: String) = x.filter { it.isLetterOrDigit() }.uppercase()
+            if (norm(cleanFp).isEmpty() || norm(cleanFp) == norm(cleanId) || norm(cleanFp) != norm(np.fingerprint)) return
+            resolvedPubKey = np.publicKeyHex
+            if (resolvedXKey.length != 64) resolvedXKey = np.x25519PublicKeyHex
+            cleanFp = np.fingerprint.trim().uppercase()
+        }
         scope.launch {
-            contactsManager.verifyContact(cleanId, cleanName, cleanFp, publicKeyHex, resolvedXKey)
+            contactsManager.verifyContact(cleanId, cleanName, cleanFp, resolvedPubKey, resolvedXKey)
             val existingConv = db.conversationDao().getById(cleanId)
             val readyText = com.example.ui.stringsFor(_language.value).chatsReadyToMessage
             db.conversationDao().upsert(
@@ -1036,7 +1055,7 @@ class MeshRepository private constructor(private val context: Context) {
         timestamp: Long
     ) {
         val aad = buildChatAad(chatId, isChannel, _identity.value.nodeId)
-        val encryptedText = cryptoManager.encryptTextWithKey(keyBytes, plaintext, aad)
+        val encryptedText = runCatching { cryptoManager.encryptTextWithKey(keyBytes, plaintext, aad) }.getOrNull() ?: return // لا إرسال بدون تشفير
         val payloadObj = JSONObject().apply {
             put("msgId", msgId)
             put("chatId", chatId)
@@ -1069,7 +1088,7 @@ class MeshRepository private constructor(private val context: Context) {
         timestamp: Long
     ) {
         val aad = buildChatAad(chatId, isChannel, _identity.value.nodeId)
-        val encMedia = cryptoManager.encryptTextWithKey(keyBytes, rawB64, aad)
+        val encMedia = runCatching { cryptoManager.encryptTextWithKey(keyBytes, rawB64, aad) }.getOrNull() ?: return // لا إرسال بدون تشفير
         if (encMedia.length <= MediaChunkAssembler.CHUNK_SIZE_CHARS) {
             val payloadObj = JSONObject().apply {
                 put("msgId", msgId)

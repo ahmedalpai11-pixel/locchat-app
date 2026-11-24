@@ -1,7 +1,8 @@
 # Roadmap (LocChat vs bitchat)
 
 ## Next (security)
-- [ ] Noise XX sessions with forward secrecy + visible safety numbers
+- [x] Forward-secret direct-chat sessions (Noise-KK-style handshake + hash ratchet) — shipped in 1.2
+- [ ] Visible safety numbers / session fingerprint in the UI
 - [ ] Signed QR v2 (Ed25519 signature over node ID, name, both keys)
 - [ ] Fail loudly when Keystore is unavailable; require device lock for biometric option
 - [ ] Salted/versioned channel-key derivation with migration

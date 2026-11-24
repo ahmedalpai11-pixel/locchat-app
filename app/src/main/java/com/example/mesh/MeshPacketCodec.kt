@@ -19,7 +19,9 @@ enum class MeshPacketType {
     DELIVERY_ACK,
     FEED_POST,
     FEED_COMMENT,
-    BLOCK_BROADCAST
+    BLOCK_BROADCAST,
+    SESSION_INIT,
+    SESSION_RESP
 }
 
 data class MeshPacket(

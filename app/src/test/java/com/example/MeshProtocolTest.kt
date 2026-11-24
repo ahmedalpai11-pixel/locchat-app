@@ -475,4 +475,25 @@ class MeshProtocolTest {
             db.close()
         }
     }
+
+    @Test
+    fun `session handshake packets round trip through the wire codec`() {
+        for (type in listOf(MeshPacketType.SESSION_INIT, MeshPacketType.SESSION_RESP)) {
+            val pkt = MeshPacket(
+                type = type,
+                senderId = "LC-" + "A".repeat(32),
+                senderName = "tester",
+                senderPubKeyHex = "11".repeat(32),
+                senderX25519KeyHex = "22".repeat(32),
+                targetId = "LC-" + "B".repeat(32),
+                isChannel = false,
+                payload = "0011223344556677|" + "ab".repeat(32) + "|" + "cd".repeat(16)
+            )
+            val decoded = MeshPacketCodec.decodeFrame(MeshPacketCodec.encodeFrame(pkt))
+            assertNotNull(decoded)
+            assertEquals(type, decoded?.type)
+            assertEquals(pkt.payload, decoded?.payload)
+            assertEquals(pkt.targetId, decoded?.targetId)
+        }
+    }
 }

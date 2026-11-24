@@ -12,7 +12,8 @@
 | Trust | Key pinning for verified contacts; QR verification binds node ID ↔ Ed25519 key |
 
 ## Known limitations (see ROADMAP.md)
-- No forward secrecy for direct chats (static–static DH). A leaked device key exposes past traffic.
+- Direct chats have forward secrecy per message (hash ratchet inside an ephemeral-key session). Compromise of a live session's current chain key still exposes messages until the next rotation (≤30 min / 100 messages). Channels use a passphrase-derived key and have no forward secrecy.
+- The session handshake is a custom Noise-KK-style construction and has not been independently reviewed.
 - Relays and nearby observers can see metadata (sender, target, size, timing).
 - QR payload is not signed; the X25519 key in it is not cryptographically bound to the Ed25519 key.
 - Biometric lock is skipped when the device has no screen lock/biometrics enrolled.

@@ -139,7 +139,7 @@ class BleMeshEngine(
         @Synchronized fun clear() = map.clear()
     }
 
-    private val seenPackets = SeenCache(1000)
+    private val seenPackets = SeenCache(3000)
     private val outboxCache = ArrayList<MeshPacket>()
 
     private val _nearbyPeers = MutableStateFlow<List<NearbyPeer>>(emptyList())
@@ -350,7 +350,13 @@ class BleMeshEngine(
         synchronized(outboxCache) {
             if (outboxCache.none { it.packetId == packet.packetId }) {
                 outboxCache.add(packet)
-                if (outboxCache.size > 150) outboxCache.removeAt(0)
+                if (outboxCache.size > MAX_OUTBOX_PACKETS) {
+                    // FIX: كانت قطع الوسائط الكبيرة تطرد الرسائل النصية القديمة؛ نطرد الوسائط أولاً
+                    val bulkIdx = outboxCache.indexOfFirst {
+                        it.type == MeshPacketType.MEDIA_CHUNK || it.type == MeshPacketType.CHAT_MEDIA
+                    }
+                    outboxCache.removeAt(if (bulkIdx >= 0) bulkIdx else 0)
+                }
             }
             _status.value = _status.value.copy(cachedPacketsCount = outboxCache.size)
         }
@@ -1122,12 +1128,13 @@ class BleMeshEngine(
 
         private const val MAX_PACKET_AGE_MS = 12 * 3_600_000L
         private const val MAX_FUTURE_SKEW_MS = 5 * 60_000L
-        private const val PEER_TIMEOUT_MS = 75_000L
+        private const val PEER_TIMEOUT_MS = 150_000L // أطول ليبقى الأقران البعيدون (عدة قفزات) ثابتين في القائمة
 
         private const val MTU_REQUEST = 512
         private const val MAX_CLIENT_LINKS = 6
         private const val MAX_PENDING_PER_LINK = 64
-        private const val MAX_SYNC_PACKETS = 20
+        private const val MAX_SYNC_PACKETS = 40
+        private const val MAX_OUTBOX_PACKETS = 300
         private const val CONNECT_TIMEOUT_MS = 15_000L
         private const val WRITE_TIMEOUT_MS = 3_000L
         private const val TIEBREAK_FALLBACK_MS = 8_000L

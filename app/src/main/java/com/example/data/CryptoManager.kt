@@ -125,6 +125,7 @@ class CryptoManager(context: Context) {
         KeystoreKeyWrapper.deleteMasterKey()
         channelKeyCache.clear()
         prefs.edit()
+            .remove(KEY_DM_SESSIONS)
             .putBoolean(KEY_NICKNAME_CONFIGURED, !nickname.isNullOrBlank())
             .putBoolean(KEY_STEALTH_MODE, false)
             .apply()
@@ -219,6 +220,43 @@ class CryptoManager(context: Context) {
         } catch (_: Exception) {
             null
         }
+    }
+
+    /** المفتاح العام X25519 الثابت (32 بايت) لاستخدامه في مصافحة الجلسات. */
+    fun myX25519PublicBytes(): ByteArray? {
+        return try {
+            val b64 = prefs.getString(KEY_X_PUB_B64, null) ?: return null
+            Base64.decode(b64, Base64.NO_WRAP).takeIf { it.size == 32 }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** DH(s_me, peerPub) بالمفتاح الثابت دون كشف المفتاح الخاص. يرجع null عند الفشل/النقطة الصفرية. */
+    fun x25519StaticDh(peerPub: ByteArray): ByteArray? {
+        return try {
+            if (peerPub.size != 32) return null
+            val wrappedPriv = prefs.getString(KEY_X_PRIV_B64, null) ?: return null
+            val privBytes = KeystoreKeyWrapper.unwrapPrivateKey(wrappedPriv) ?: return null
+            val agreement = X25519Agreement()
+            agreement.init(X25519PrivateKeyParameters(privBytes, 0))
+            val out = ByteArray(agreement.agreementSize)
+            agreement.calculateAgreement(X25519PublicKeyParameters(peerPub, 0), out, 0)
+            if (out.all { it == 0.toByte() }) null else out
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** حالة جلسات السرية المستقبلية، مغلّفة بمفتاح Keystore. */
+    fun saveSessionBlob(blob: String) {
+        val wrapped = KeystoreKeyWrapper.wrapPrivateKey(blob.toByteArray(Charsets.UTF_8))
+        prefs.edit().putString(KEY_DM_SESSIONS, wrapped).apply()
+    }
+
+    fun loadSessionBlob(): String? {
+        val stored = prefs.getString(KEY_DM_SESSIONS, null) ?: return null
+        return KeystoreKeyWrapper.unwrapPrivateKey(stored)?.toString(Charsets.UTF_8)
     }
 
     private fun compareBytes(x: ByteArray, y: ByteArray): Int {
@@ -376,6 +414,7 @@ class CryptoManager(context: Context) {
         private const val KEY_ED_PUB_B64 = "ed25519_pub_b64"
         private const val KEY_X_PRIV_B64 = "x25519_priv_b64"
         private const val KEY_X_PUB_B64 = "x25519_pub_b64"
+        private const val KEY_DM_SESSIONS = "dm_sessions_wrapped"
         private const val KEY_NICKNAME = "node_nickname"
         private const val KEY_NICKNAME_CONFIGURED = "nickname_configured"
         private const val KEY_BIOMETRIC_LOCK = "biometric_lock_enabled"

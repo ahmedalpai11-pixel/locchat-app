@@ -1,6 +1,7 @@
 package com.example.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -11,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -124,24 +126,32 @@ fun LocChatHomeScreen(
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            LocChatSquircleLogo(
-                                size = 38.dp,
-                                modifier = Modifier.clickable {
-                                    val now = System.currentTimeMillis()
-                                    logoTapCount = if (now - lastLogoTapMs < 1500L) logoTapCount + 1 else 1
-                                    lastLogoTapMs = now
-                                    if (logoTapCount >= 3) {
-                                        logoTapCount = 0
-                                        showQuickPanicDialog = true
-                                    }
-                                }
+                Column {
+                    CenterAlignedTopAppBar(
+                        navigationIcon = {
+                            LocChatAvatar(
+                                label = identity.nickname,
+                                size = 34.dp,
+                                modifier = Modifier
+                                    .padding(start = 14.dp)
+                                    .testTag("identity_header_chip"),
+                                onClick = { currentTab = HomeTab.IDENTITY }
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                LocChatWordmark(fontSize = 20.sp)
+                        },
+                        title = {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                LocChatSquircleLogo(
+                                    size = 28.dp,
+                                    modifier = Modifier.clickable {
+                                        val now = System.currentTimeMillis()
+                                        logoTapCount = if (now - lastLogoTapMs < 1500L) logoTapCount + 1 else 1
+                                        lastLogoTapMs = now
+                                        if (logoTapCount >= 3) {
+                                            logoTapCount = 0
+                                            showQuickPanicDialog = true
+                                        }
+                                    }
+                                )
                                 Text(
                                     text = when {
                                         isStealthMode -> "${s.stealthHeaderStatus} ${meshStatus.packetsRelayed}"
@@ -152,50 +162,39 @@ fun LocChatHomeScreen(
                                     color = when {
                                         isStealthMode -> PrivateShieldGold
                                         isLocalPreviewMode -> RadarAmber
-                                        else -> NearbyCyanTeal
-                                    }
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    maxLines = 1
                                 )
                             }
-                        }
-                    },
-                    actions = {
-                        IconButton(
-                            onClick = { showQuickMyQrDialog = true },
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("topbar_my_qr_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.QrCode2,
-                                contentDescription = s.myQrButtonDesc,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        AssistChip(
-                            onClick = { currentTab = HomeTab.IDENTITY },
-                            label = { Text(identity.nickname, maxLines = 1) },
-                            leadingIcon = {
+                        },
+                        actions = {
+                            IconButton(
+                                onClick = { showQuickMyQrDialog = true },
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("topbar_my_qr_button")
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Default.BluetoothAudio,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
+                                    imageVector = Icons.Outlined.QrCode2,
+                                    contentDescription = s.myQrButtonDesc,
+                                    tint = MaterialTheme.colorScheme.onBackground
                                 )
-                            },
-                            modifier = Modifier
-                                .padding(end = 10.dp)
-                                .testTag("identity_header_chip")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background
                         )
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background
                     )
-                )
+                    FeedDivider()
+                }
             },
             bottomBar = {
                 if (!useRail) {
+                    Column {
+                    FeedDivider()
                     NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surface,
+                        containerColor = MaterialTheme.colorScheme.background,
                         tonalElevation = 0.dp
                     ) {
                         HomeTab.entries.forEach { tab ->
@@ -222,30 +221,42 @@ fun LocChatHomeScreen(
                                         )
                                     }
                                 },
-                                label = { Text(tabLabel, maxLines = 1) },
+                                alwaysShowLabel = false,
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.onBackground,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    indicatorColor = Color.Transparent
+                                ),
                                 modifier = Modifier.testTag(tab.tag)
                             )
                         }
+                    }
                     }
                 }
             },
             floatingActionButton = {
                 when (currentTab) {
                     HomeTab.FEED -> {
-                        ExtendedFloatingActionButton(
+                        FloatingActionButton(
                             onClick = { showCreatePostDialog = true },
-                            icon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            text = { Text(s.fabNewPost) },
+                            shape = CircleShape,
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = Color.White,
                             modifier = Modifier.testTag("fab_new_post")
-                        )
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = s.fabNewPost)
+                        }
                     }
                     HomeTab.CHATS -> {
-                        ExtendedFloatingActionButton(
+                        FloatingActionButton(
                             onClick = { showCreateChannelDialog = true },
-                            icon = { Icon(Icons.Default.Tag, contentDescription = null) },
-                            text = { Text(s.fabNewChannel) },
+                            shape = CircleShape,
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = Color.White,
                             modifier = Modifier.testTag("fab_new_channel")
-                        )
+                        ) {
+                            Icon(Icons.Default.Tag, contentDescription = s.fabNewChannel)
+                        }
                     }
                     else -> Unit
                 }
@@ -258,7 +269,7 @@ fun LocChatHomeScreen(
             ) {
                 if (useRail) {
                     NavigationRail(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        containerColor = MaterialTheme.colorScheme.background
                     ) {
                         Spacer(modifier = Modifier.height(12.dp))
                         HomeTab.entries.forEach { tab ->
@@ -294,6 +305,8 @@ fun LocChatHomeScreen(
                             activePeersCount = activePeersCount,
                             cachedPacketsCount = meshStatus.cachedPacketsCount,
                             myNodeId = identity.nodeId,
+                            myNickname = identity.nickname,
+                            nearbyPeers = nearbyPeers,
                             selectedCategory = selectedCategory,
                             broadcastBannerMessage = feedBroadcastBanner,
                             onOpenCreatePost = { showCreatePostDialog = true },

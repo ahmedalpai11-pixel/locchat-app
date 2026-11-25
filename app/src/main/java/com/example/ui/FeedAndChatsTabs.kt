@@ -7,10 +7,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -36,6 +38,7 @@ import coil.compose.AsyncImage
 import com.example.data.MediaHelper
 import com.example.model.ChatConversation
 import com.example.model.FeedPost
+import com.example.model.NearbyPeer
 import com.example.model.PostCategory
 import com.example.ui.theme.LocChatBrandGradient
 import com.example.ui.theme.NearbyCyanTeal
@@ -62,148 +65,142 @@ fun FeedTab(
     onAddComment: (String, String) -> Unit,
     onReBroadcastPost: (String) -> Unit,
     onDirectMessageAuthor: (peerId: String, nickname: String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    myNickname: String = "",
+    nearbyPeers: List<NearbyPeer> = emptyList()
 ) {
     val s = LocalAppStrings.current
     val filteredPosts = remember(posts, selectedCategory) {
         if (selectedCategory == PostCategory.ALL) posts
         else posts.filter { it.category == selectedCategory }
     }
+    val visiblePeers = remember(nearbyPeers) { nearbyPeers.filter { !it.isBlocked } }
     var fullscreenImagePath by remember { mutableStateOf<String?>(null) }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, LocChatBrandGradient),
-            tonalElevation = 1.dp
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 96.dp)
+    ) {
+        // Instagram-style "stories": people around you, tap to start a private chat
+        item(key = "stories") {
+            Column {
+                StoriesRow(
+                    myNickname = myNickname,
+                    peers = visiblePeers,
+                    onAddPost = onOpenCreatePost,
+                    onOpenPeer = onDirectMessageAuthor
+                )
+                FeedDivider()
+            }
+        }
+
+        // X-style inline composer
+        item(key = "compose") {
+            Column {
+                Row(
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(LocChatBrandGradient),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .clickable { onOpenCreatePost() }
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .testTag("feed_quick_compose_bar"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    LocChatAvatar(label = myNickname, size = 40.dp)
+                    Text(
+                        text = s.feedQuickComposePrompt,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
                     Icon(
-                        imageVector = Icons.Default.Hub,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
+                        imageVector = Icons.Default.Image,
+                        contentDescription = s.feedAttachImage,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
+                FeedDivider()
+            }
+        }
+
+        if (broadcastBannerMessage != null) {
+            item(key = "banner") {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = MaterialTheme.shapes.small,
+                    color = VerifiedEmerald.copy(alpha = 0.14f)
+                ) {
                     Text(
-                        text = s.feedHeroTitleAvailable(activePeersCount),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = s.feedHeroSubtitle(cachedPacketsCount),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = broadcastBannerMessage,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = VerifiedEmerald,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                     )
                 }
             }
         }
 
-        // Inline Quick Publish Bar right on the Home Page
-        Surface(
-            onClick = onOpenCreatePost,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp)
-                .testTag("feed_quick_compose_bar"),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-            border = locChatRimBorder()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.BluetoothConnected,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = s.feedQuickComposePrompt,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = s.feedPublishConfirm,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-
-        AnimatedVisibility(visible = broadcastBannerMessage != null) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                shape = MaterialTheme.shapes.small,
-                color = VerifiedEmerald.copy(alpha = 0.14f)
-            ) {
-                Text(
-                    text = broadcastBannerMessage.orEmpty(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = VerifiedEmerald,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            PostCategory.entries.forEach { cat ->
-                FilterChip(
-                    selected = selectedCategory == cat,
-                    onClick = { onSelectCategory(cat) },
-                    label = { Text(cat.label(s.language)) },
-                    modifier = Modifier.testTag("feed_filter_${cat.id}")
-                )
+        // X-style underlined tabs for categories
+        item(key = "tabs") {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    PostCategory.entries.forEach { cat ->
+                        val selected = selectedCategory == cat
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clickable { onSelectCategory(cat) }
+                                .padding(horizontal = 18.dp)
+                                .testTag("feed_filter_${cat.id}")
+                        ) {
+                            Text(
+                                text = cat.label(s.language),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) MaterialTheme.colorScheme.onBackground
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 14.dp, bottom = 10.dp)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .width(34.dp)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
+                                    )
+                            )
+                        }
+                    }
+                }
+                FeedDivider()
             }
         }
 
         if (filteredPosts.isEmpty()) {
-            EmptyStateBox(
-                icon = Icons.Default.DynamicFeed,
-                title = s.feedEmptyTitle,
-                subtitle = s.feedEmptySubtitle
-            )
+            item(key = "empty") {
+                EmptyStateBox(
+                    icon = Icons.Default.DynamicFeed,
+                    title = s.feedEmptyTitle,
+                    subtitle = s.feedEmptySubtitle,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 56.dp)
+                )
+            }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(filteredPosts, key = { it.id }) { post ->
+            items(filteredPosts, key = { it.id }) { post ->
+                Column {
                     FeedPostCard(
                         post = post,
                         isMine = post.authorId == myNodeId,
@@ -214,6 +211,7 @@ fun FeedTab(
                         onDirectMessage = { onDirectMessageAuthor(post.authorId, post.authorName) },
                         onImageClick = { post.imagePath?.let { fullscreenImagePath = it } }
                     )
+                    FeedDivider()
                 }
             }
         }
@@ -241,6 +239,110 @@ fun FeedTab(
 }
 
 @Composable
+private fun StoriesRow(
+    myNickname: String,
+    peers: List<NearbyPeer>,
+    onAddPost: () -> Unit,
+    onOpenPeer: (peerId: String, nickname: String) -> Unit
+) {
+    val s = LocalAppStrings.current
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item(key = "story_me") {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .width(70.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .clickable { onAddPost() }
+                    .testTag("story_me")
+            ) {
+                Box(modifier = Modifier.size(66.dp), contentAlignment = Alignment.Center) {
+                    LocChatAvatar(label = myNickname, size = 62.dp)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.background)
+                            .padding(2.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = s.fabNewPost,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        items(peers, key = { it.peerId }) { peer ->
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .width(70.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .clickable { onOpenPeer(peer.peerId, peer.nickname) }
+                    .testTag("story_peer_${peer.peerId}")
+            ) {
+                LocChatAvatar(label = peer.nickname, size = 66.dp, ring = true)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = peer.nickname,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PostAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String?,
+    tint: Color,
+    description: String?,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = tint,
+            modifier = Modifier.size(19.dp)
+        )
+        if (!text.isNullOrEmpty()) {
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(text = text, style = MaterialTheme.typography.labelMedium, color = tint)
+        }
+    }
+}
+
+@Composable
 private fun FeedPostCard(
     post: FeedPost,
     isMine: Boolean,
@@ -258,62 +360,57 @@ private fun FeedPostCard(
     val remainingHours = remember(post.expiresAt) {
         ((post.expiresAt - System.currentTimeMillis()) / 3_600_000L).coerceAtLeast(1L)
     }
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
 
-    Surface(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("feed_post_${post.id}"),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface,
-        border = locChatRimBorder(),
-        tonalElevation = 1.dp
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag("feed_post_${post.id}")
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(LocChatBrandGradient),
-                    contentAlignment = Alignment.Center
+        LocChatAvatar(label = post.authorName, size = 42.dp)
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = post.authorName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = formatTime(post.createdAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = muted,
+                    maxLines = 1
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                val catName = post.category.label(s.language)
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Text(
-                        text = post.authorName.take(1).uppercase(),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
+                        text = if (post.hopCount == 0) catName else "$catName • ${s.hopsLabel(post.hopCount)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = muted,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = post.authorName,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${formatTime(post.createdAt)} • ${s.remainingHours(remainingHours)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                AssistChip(
-                    onClick = {},
-                    label = {
-                        val catName = post.category.label(s.language)
-                        Text(
-                            text = if (post.hopCount == 0) catName else "$catName • ${s.hopsLabel(post.hopCount)}",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                )
             }
+            Text(
+                text = s.remainingHours(remainingHours),
+                style = MaterialTheme.typography.labelSmall,
+                color = muted
+            )
 
             if (post.text.isNotBlank()) {
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = post.text,
                     style = MaterialTheme.typography.bodyLarge
@@ -328,13 +425,14 @@ private fun FeedPostCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(190.dp)
-                        .clip(MaterialTheme.shapes.small)
+                        .height(220.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(0.5.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
                         .clickable { onImageClick() }
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -344,80 +442,67 @@ private fun FeedPostCard(
                 FEED_EMOJIS.forEach { emoji ->
                     val count = post.reactions[emoji] ?: 0
                     val isSelected = post.myReaction == emoji
-                    FilterChip(
-                        selected = isSelected,
+                    Surface(
                         onClick = { onReact(emoji) },
-                        label = {
-                            Text(if (count > 0) "$emoji $count" else emoji)
-                        },
+                        shape = CircleShape,
+                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                        border = BorderStroke(
+                            0.5.dp,
+                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        ),
                         modifier = Modifier.testTag("react_post_${post.id}_$emoji")
-                    )
+                    ) {
+                        Text(
+                            text = if (count > 0) "$emoji $count" else emoji,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
-            Spacer(modifier = Modifier.height(6.dp))
-
+            Spacer(modifier = Modifier.height(4.dp))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
-                    onClick = onToggleLike,
-                    modifier = Modifier.testTag("like_post_${post.id}")
-                ) {
-                    Icon(
-                        imageVector = if (post.isLikedByMe) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                        contentDescription = s.likeLabel,
-                        tint = if (post.isLikedByMe) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("${post.likesCount}")
-                }
-
-                TextButton(
-                    onClick = { showComments = !showComments },
-                    modifier = Modifier.testTag("comments_post_${post.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.ModeComment,
-                        contentDescription = null
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(s.commentsCount(post.comments.size))
-                }
-
-                TextButton(
+                PostAction(
+                    icon = Icons.Outlined.ModeComment,
+                    text = post.comments.size.takeIf { it > 0 }?.toString(),
+                    tint = if (showComments) MaterialTheme.colorScheme.primary else muted,
+                    description = s.commentsCount(post.comments.size),
+                    modifier = Modifier.testTag("comments_post_${post.id}"),
+                    onClick = { showComments = !showComments }
+                )
+                PostAction(
+                    icon = Icons.Default.Repeat,
+                    text = null,
+                    tint = if (reBroadcastDone) VerifiedEmerald else muted,
+                    description = if (reBroadcastDone) s.rebroadcastDoneLabel else s.rebroadcastLabel,
+                    modifier = Modifier.testTag("rebroadcast_post_${post.id}"),
                     onClick = {
                         reBroadcastDone = true
                         onReBroadcast()
-                    },
-                    modifier = Modifier.testTag("rebroadcast_post_${post.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Repeat,
-                        contentDescription = null
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (reBroadcastDone) s.rebroadcastDoneLabel else s.rebroadcastLabel)
-                }
-
-                if (!isMine) {
-                    TextButton(
-                        onClick = onDirectMessage,
-                        modifier = Modifier.testTag("dm_author_${post.id}")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Chat,
-                            contentDescription = null
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(s.messageLabel)
                     }
+                )
+                PostAction(
+                    icon = if (post.isLikedByMe) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                    text = post.likesCount.takeIf { it > 0 }?.toString(),
+                    tint = if (post.isLikedByMe) MaterialTheme.colorScheme.error else muted,
+                    description = s.likeLabel,
+                    modifier = Modifier.testTag("like_post_${post.id}"),
+                    onClick = onToggleLike
+                )
+                if (!isMine) {
+                    PostAction(
+                        icon = Icons.AutoMirrored.Filled.Send,
+                        text = null,
+                        tint = muted,
+                        description = s.messageLabel,
+                        modifier = Modifier.testTag("dm_author_${post.id}"),
+                        onClick = onDirectMessage
+                    )
                 }
             }
 
@@ -425,34 +510,26 @@ private fun FeedPostCard(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp)
+                        .padding(top = 6.dp)
                 ) {
                     post.comments.forEach { comment ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp),
-                            shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
+                        Row(modifier = Modifier.padding(vertical = 6.dp)) {
+                            LocChatAvatar(label = comment.authorName, size = 28.dp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = comment.authorName,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold
                                     )
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = formatTime(comment.createdAt),
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = muted
                                     )
                                 }
-                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(text = comment.text, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
@@ -469,7 +546,7 @@ private fun FeedPostCard(
                             onValueChange = { commentDraft = it },
                             placeholder = { Text(s.commentPlaceholder) },
                             singleLine = true,
-                            shape = MaterialTheme.shapes.small,
+                            shape = CircleShape,
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("comment_input_${post.id}")
@@ -515,103 +592,98 @@ fun ChatsTab(
     } else {
         LazyColumn(
             modifier = modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp)
         ) {
             items(conversations, key = { it.id }) { conv ->
-                Surface(
+                val hasUnread = conv.unreadCount > 0
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.medium)
                         .clickable { onOpenChat(conv) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                         .testTag("conversation_card_${conv.id}"),
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.surface,
-                    border = locChatRimBorder(),
-                    tonalElevation = 1.dp
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    if (conv.isChannel) MaterialTheme.colorScheme.secondaryContainer
-                                    else MaterialTheme.colorScheme.primaryContainer
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (conv.isChannel) Icons.Default.Tag else Icons.Default.Person,
-                                contentDescription = if (conv.isChannel) "قناة محلية" else "محادثة فردية",
-                                tint = if (conv.isChannel) MaterialTheme.colorScheme.secondary
-                                else MaterialTheme.colorScheme.primary
+                    Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+                        LocChatAvatar(
+                            label = conv.title,
+                            size = 58.dp,
+                            isChannel = conv.isChannel,
+                            ring = hasUnread
+                        )
+                        if (conv.isOnline && !conv.isChannel) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.background)
+                                    .padding(2.5.dp)
+                                    .clip(CircleShape)
+                                    .background(VerifiedEmerald)
                             )
                         }
+                    }
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(14.dp))
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = conv.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (conv.isProtectedChannel) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.Lock,
-                                        contentDescription = "قناة محمية بكلمة مرور",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                }
-                                if (conv.isVerified) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.VerifiedUser,
-                                        contentDescription = "موثق",
-                                        tint = VerifiedEmerald,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                if (conv.isOnline && !conv.isChannel) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(VerifiedEmerald)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(3.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = conv.lastMessage,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = conv.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.SemiBold,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
+                            if (conv.isProtectedChannel) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = "قناة محمية بكلمة مرور",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            if (conv.isVerified) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Verified,
+                                    contentDescription = "موثق",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = conv.lastMessage,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (hasUnread) MaterialTheme.colorScheme.onBackground
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
 
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = formatTime(conv.lastMessageTime),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (conv.unreadCount > 0) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Badge(containerColor = MaterialTheme.colorScheme.primary) {
-                                    Text("${conv.unreadCount}")
-                                }
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = formatTime(conv.lastMessageTime),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (hasUnread) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (hasUnread) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = Color.White
+                            ) {
+                                Text("${conv.unreadCount}")
                             }
                         }
                     }
@@ -785,37 +857,28 @@ fun CreateChannelDialog(
 fun EmptyStateBox(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
-    subtitle: String
+    subtitle: String,
+    modifier: Modifier = Modifier.fillMaxSize()
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
+        modifier = modifier.padding(horizontal = 40.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Surface(
-            modifier = Modifier.size(76.dp),
-            shape = RoundedCornerShape(22.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, LocChatBrandGradient)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(34.dp),
-                    tint = NearbyCyanTeal
-                )
-            }
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = subtitle,
             style = MaterialTheme.typography.bodyMedium,

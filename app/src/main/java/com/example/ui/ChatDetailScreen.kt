@@ -130,6 +130,13 @@ fun ChatDetailScreen(
                     }
                 },
                 title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    LocChatAvatar(
+                        label = conversation.title,
+                        size = 38.dp,
+                        isChannel = conversation.isChannel
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -156,8 +163,11 @@ fun ChatDetailScreen(
                                 "محادثة مشفرة • ${conversation.peerFingerprint}"
                             },
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                    }
                     }
                 },
                 actions = {
@@ -185,7 +195,7 @@ fun ChatDetailScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(MaterialTheme.colorScheme.background)
                     .imePadding()
                     .navigationBarsPadding()
             ) {
@@ -327,6 +337,12 @@ fun ChatDetailScreen(
                             placeholder = { Text("اكتب رسالة أو /help...") },
                             maxLines = 4,
                             shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("chat_message_input")
@@ -530,25 +546,22 @@ private fun ChatMessageBubble(
     val alignment = if (message.isFromMe) Alignment.End else Alignment.Start
     val isDark = isSystemInDarkTheme()
     val bubbleShape = RoundedCornerShape(
-        topStart = 20.dp,
-        topEnd = 20.dp,
-        bottomStart = if (message.isFromMe) 20.dp else 6.dp,
-        bottomEnd = if (message.isFromMe) 6.dp else 20.dp
+        topStart = 22.dp,
+        topEnd = 22.dp,
+        bottomStart = if (message.isFromMe) 22.dp else 6.dp,
+        bottomEnd = if (message.isFromMe) 6.dp else 22.dp
     )
+    // Outgoing: brand gradient with white text. Incoming: flat grey bubble.
     val outgoingBrush = Brush.linearGradient(
-        colors = if (isDark) {
-            listOf(Color(0xFF0E3C54), Color(0xFF1A2D5E), Color(0xFF2B1C54))
-        } else {
-            listOf(Color(0xFFD9F3FF), Color(0xFFE3ECFF), Color(0xFFEEE5FF))
-        }
+        colors = listOf(MeshAzure, MeshViolet)
     )
     val incomingBrush = Brush.linearGradient(
         colors = listOf(
-            MaterialTheme.colorScheme.surface,
+            MaterialTheme.colorScheme.surfaceVariant,
             MaterialTheme.colorScheme.surfaceVariant
         )
     )
-    val contentColor = MaterialTheme.colorScheme.onSurface
+    val contentColor = if (message.isFromMe) Color.White else MaterialTheme.colorScheme.onSurface
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -557,20 +570,7 @@ private fun ChatMessageBubble(
         Surface(
             shape = bubbleShape,
             color = Color.Transparent,
-            border = if (message.isFromMe) {
-                BorderStroke(
-                    1.dp,
-                    Brush.linearGradient(
-                        listOf(
-                            ElectricCyan.copy(alpha = 0.55f),
-                            MeshAzure.copy(alpha = 0.45f),
-                            MeshViolet.copy(alpha = 0.55f)
-                        )
-                    )
-                )
-            } else {
-                locChatRimBorder()
-            },
+            border = null,
             modifier = Modifier
                 .widthIn(max = 310.dp)
                 .clip(bubbleShape)
@@ -637,13 +637,15 @@ private fun ChatMessageBubble(
                                 Icon(
                                     imageVector = if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
                                     contentDescription = if (isPlaying) "إيقاف" else "تشغيل",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = if (message.isFromMe) Color.White else MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(32.dp)
                                 )
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 LinearProgressIndicator(
                                     progress = { if (isPlaying) playbackProgress else 0f },
+                                    color = if (message.isFromMe) Color.White else MaterialTheme.colorScheme.primary,
+                                    trackColor = contentColor.copy(alpha = 0.25f),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))

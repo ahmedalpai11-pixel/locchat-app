@@ -51,7 +51,11 @@ android {
       }
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      // يعمل البناء المحلي بلا debug.keystore (يُستخدم مفتاح أندرويد الافتراضي)؛ والـCI يولّد المفتاح.
+      val customDebugKeystore = file(System.getenv("DEBUG_KEYSTORE_PATH") ?: "${rootDir}/debug.keystore")
+      if (customDebugKeystore.exists()) {
+        signingConfig = signingConfigs.getByName("debugConfig")
+      }
     }
   }
   compileOptions {

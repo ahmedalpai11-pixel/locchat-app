@@ -24,23 +24,29 @@ val PrivateShieldGold = Color(0xFFF5A623)
 val RadarAmber = Color(0xFFF5A623)
 val RadarAmberDark = Color(0xFFB26A00)
 
-// Surfaces — Obsidian Midnight (Dark Theme)
-val SlateBgDark = Color(0xFF080D16)
-val SlateSurfaceDark = Color(0xFF0E1624)
-val SlateSurfaceVariantDark = Color(0xFF152236)
-val SlateOutlineDark = Color(0xFF263854)
+// Social-feed palette: flat black / white canvas with hairline dividers
+// Primary action colour
+val SignalBlue = Color(0xFF1D9BF0)
+val SignalBlueContainerDark = Color(0xFF0D2B40)
+val SignalBlueContainerLight = Color(0xFFE8F5FD)
 
-// Surfaces — Frost Ice Light (Light Theme matching the glossy white C)
-val MistBgLight = Color(0xFFF2F6FC)
+// Surfaces — Dark (pure black canvas, raised surfaces for dialogs/inputs)
+val SlateBgDark = Color(0xFF000000)
+val SlateSurfaceDark = Color(0xFF16181C)
+val SlateSurfaceVariantDark = Color(0xFF202327)
+val SlateOutlineDark = Color(0xFF2F3336)
+
+// Surfaces — Light
+val MistBgLight = Color(0xFFFFFFFF)
 val MistSurfaceLight = Color(0xFFFFFFFF)
-val MistSurfaceVariantLight = Color(0xFFE7EFFA)
-val MistOutlineLight = Color(0xFFC5D5EA)
+val MistSurfaceVariantLight = Color(0xFFF1F4F5)
+val MistOutlineLight = Color(0xFFE1E8EC)
 
 // Text
-val TextPrimaryDark = Color(0xFFF3F7FD)
-val TextSecondaryDark = Color(0xFF96ACC7)
-val TextPrimaryLight = Color(0xFF0C1626)
-val TextSecondaryLight = Color(0xFF4F6684)
+val TextPrimaryDark = Color(0xFFE7E9EA)
+val TextSecondaryDark = Color(0xFF71767B)
+val TextPrimaryLight = Color(0xFF0F1419)
+val TextSecondaryLight = Color(0xFF536471)
 
 // Semantic Status
 val VerifiedEmerald = Color(0xFF22C55E)

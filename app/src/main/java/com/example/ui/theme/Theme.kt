@@ -11,10 +11,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 private val DarkColorScheme = darkColorScheme(
-    primary = ElectricCyan,
-    onPrimary = Color(0xFF031F2C),
-    primaryContainer = ElectricCyanContainerDark,
-    onPrimaryContainer = Color(0xFFBDF2FF),
+    primary = SignalBlue,
+    onPrimary = Color.White,
+    primaryContainer = SignalBlueContainerDark,
+    onPrimaryContainer = Color(0xFFCDE9FB),
     secondary = MeshViolet,
     onSecondary = Color(0xFF1B093B),
     secondaryContainer = MeshVioletContainerDark,
@@ -35,10 +35,10 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = ElectricCyanDark,
+    primary = SignalBlue,
     onPrimary = Color.White,
-    primaryContainer = ElectricCyanContainerLight,
-    onPrimaryContainer = Color(0xFF002438),
+    primaryContainer = SignalBlueContainerLight,
+    onPrimaryContainer = Color(0xFF0B3A5A),
     secondary = MeshVioletDark,
     onSecondary = Color.White,
     secondaryContainer = MeshVioletContainerLight,
@@ -58,13 +58,13 @@ private val LightColorScheme = lightColorScheme(
     onErrorContainer = Color(0xFF6B0B1B)
 )
 
-// Squircle-inspired rounded shapes mirroring the glossy app icon
+// Tighter radii: soft but flat, like a social feed
 val LocChatShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(14.dp),
-    medium = RoundedCornerShape(20.dp),
-    large = RoundedCornerShape(26.dp),
-    extraLarge = RoundedCornerShape(32.dp)
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp)
 )
 
 @Composable

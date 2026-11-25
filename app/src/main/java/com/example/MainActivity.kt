@@ -103,14 +103,15 @@ private fun LocChatRootContent(
     val s = LocalAppStrings.current
 
     val requiredPermissions = remember {
-        mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ).apply {
+        mutableListOf<String>().apply {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 add(Manifest.permission.BLUETOOTH_SCAN)
                 add(Manifest.permission.BLUETOOTH_ADVERTISE)
                 add(Manifest.permission.BLUETOOTH_CONNECT)
+            } else {
+                // أندرويد 11 وأقل: المسح عبر BLE يتطلب الموقع
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
@@ -118,9 +119,14 @@ private fun LocChatRootContent(
         }.toTypedArray()
     }
 
+    // FIX: إذنا الإشعارات اختياري؛ رفضه كان يُبقي المستخدم عالقًا في شاشة الصلاحيات
+    val mandatoryPermissions = remember {
+        requiredPermissions.filter { it != Manifest.permission.POST_NOTIFICATIONS }
+    }
+
     var hasPermissions by remember {
         mutableStateOf(
-            requiredPermissions.all {
+            mandatoryPermissions.all {
                 ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
             }
         )
@@ -160,7 +166,9 @@ private fun LocChatRootContent(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        hasPermissions = results.keys.all { results[it] == true }
+        hasPermissions = mandatoryPermissions.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
         isLocationEnabled = checkLocationEnabledForBle(context)
         isBluetoothOn = checkBluetoothEnabled(context)
     }

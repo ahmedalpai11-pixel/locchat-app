@@ -7,12 +7,15 @@ import com.example.data.ChannelMembershipEntity
 import com.example.data.ContactsManager
 import com.example.data.ConversationEntity
 import com.example.data.CryptoManager
+import com.example.data.DirectSessionManager
 import com.example.data.FeedPostEntity
 import com.example.data.LocChatDatabase
 import com.example.data.LocalIdentityEntity
 import com.example.data.MediaHelper
 import com.example.data.MessageEntity
 import com.example.data.PostCommentEntity
+import com.example.data.SendKey
+import com.example.data.StaticKeyProvider
 import com.example.model.AppLanguage
 import com.example.model.ChatConversation
 import com.example.model.ChatMessage
@@ -42,9 +45,21 @@ import java.util.concurrent.ConcurrentHashMap
 
 class MeshRepository private constructor(private val context: Context) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+                android.util.Log.e("MeshRepository", "Unhandled coroutine error", e)
+            }
+    )
     private val db = LocChatDatabase.getInstance(context)
     private val cryptoManager = CryptoManager(context)
+    private val directSessions = DirectSessionManager(
+        keys = object : StaticKeyProvider {
+            override fun publicKey(): ByteArray? = cryptoManager.myX25519PublicBytes()
+            override fun dh(peerPub: ByteArray): ByteArray? = cryptoManager.x25519StaticDh(peerPub)
+        },
+        persist = { blob -> runCatching { cryptoManager.saveSessionBlob(blob) } }
+    ).also { mgr -> runCatching { mgr.restore(cryptoManager.loadSessionBlob()) } }
     private val mediaChunkAssembler = MediaChunkAssembler()
 
     val contactsManager = ContactsManager(db.verifiedContactDao(), db.blockedPeerDao())
@@ -104,7 +119,7 @@ class MeshRepository private constructor(private val context: Context) {
         cryptoManager = cryptoManager,
         contactsManager = contactsManager,
         onPeerKeyLearned = { peerId, x25519KeyHex ->
-            flushPendingDirectMessages(peerId, x25519KeyHex)
+            onPeerKeyKnown(peerId, x25519KeyHex)
         },
         onPacketReceived = { packet -> handleIncomingPacket(packet) }
     )
@@ -340,7 +355,7 @@ class MeshRepository private constructor(private val context: Context) {
             peerX25519KeyHex = peerXKey,
             isVerified = verified,
             isProtectedChannel = passHash.isNotEmpty(),
-            lastMessage = if (isChannel) "تم إنشاء القناة المحلية" else "بدء محادثة مشفرة (X25519 + AES-GCM)",
+            lastMessage = if (isChannel) "تم إنشاء القناة المحلية" else "بدء محادثة مشفرة (X25519 + AES-GCM + سرية مستقبلية)",
             lastMessageTime = System.currentTimeMillis(),
             unreadCount = 0,
             isOnline = isChannel || nearbyPeers.value.any { it.peerId == cleanId }
@@ -382,8 +397,9 @@ class MeshRepository private constructor(private val context: Context) {
                     )
                 )
             }
-            if (!isChannel && peerXKey.isBlank()) {
-                bleEngine.requestKeyHandshake()
+            if (!isChannel) {
+                if (peerXKey.isBlank()) bleEngine.requestKeyHandshake()
+                if (!directSessions.hasSession(cleanId)) ensureDirectSession(cleanId)
             }
         }
         return conv
@@ -597,11 +613,7 @@ class MeshRepository private constructor(private val context: Context) {
         val now = System.currentTimeMillis()
 
         scope.launch {
-            val directKey = if (isChannel) {
-                cryptoManager.deriveChannelKey(chatId, channelPassphrases[chatId] ?: "")
-            } else {
-                resolveDirectKey(chatId)
-            }
+            val directKey = resolveSendKey(chatId, isChannel)
 
             db.messageDao().upsert(
                 MessageEntity(
@@ -640,7 +652,7 @@ class MeshRepository private constructor(private val context: Context) {
                         timestamp = now
                     )
                 )
-                bleEngine.requestKeyHandshake()
+                ensureDirectSession(chatId)
                 return@launch
             }
 
@@ -657,11 +669,7 @@ class MeshRepository private constructor(private val context: Context) {
             val now = System.currentTimeMillis()
             val label = "صورة مضغوطة ($sizeKb ك.ب)"
 
-            val directKey = if (isChannel) {
-                cryptoManager.deriveChannelKey(chatId, channelPassphrases[chatId] ?: "")
-            } else {
-                resolveDirectKey(chatId)
-            }
+            val directKey = resolveSendKey(chatId, isChannel)
 
             db.messageDao().upsert(
                 MessageEntity(
@@ -700,7 +708,7 @@ class MeshRepository private constructor(private val context: Context) {
                         timestamp = now
                     )
                 )
-                bleEngine.requestKeyHandshake()
+                ensureDirectSession(chatId)
                 return@launch
             }
             sendEncryptedMediaPacket(chatId, isChannel, msgId, "IMAGE", label, 0, imgB64, directKey, now)
@@ -714,11 +722,7 @@ class MeshRepository private constructor(private val context: Context) {
         val label = "رسالة صوتية (${durationSec}ث)"
 
         scope.launch {
-            val directKey = if (isChannel) {
-                cryptoManager.deriveChannelKey(chatId, channelPassphrases[chatId] ?: "")
-            } else {
-                resolveDirectKey(chatId)
-            }
+            val directKey = resolveSendKey(chatId, isChannel)
 
             db.messageDao().upsert(
                 MessageEntity(
@@ -757,7 +761,7 @@ class MeshRepository private constructor(private val context: Context) {
                         timestamp = now
                     )
                 )
-                bleEngine.requestKeyHandshake()
+                ensureDirectSession(chatId)
                 return@launch
             }
             sendEncryptedMediaPacket(chatId, isChannel, msgId, "VOICE", label, durationSec, voiceB64, directKey, now)
@@ -889,10 +893,24 @@ class MeshRepository private constructor(private val context: Context) {
     ) {
         val cleanId = peerId.trim().uppercase()
         val cleanName = nickname.trim().ifEmpty { cleanId }.take(32)
-        val cleanFp = fingerprint.trim().uppercase()
-        val resolvedXKey = x25519KeyHex.ifBlank { bleEngine.getPeerX25519Key(cleanId) ?: "" }
+        var cleanFp = fingerprint.trim().uppercase()
+        var resolvedPubKey = publicKeyHex
+        var resolvedXKey = x25519KeyHex.ifBlank { bleEngine.getPeerX25519Key(cleanId) ?: "" }
+        if (resolvedPubKey.length != 64) {
+            // FIX: الإضافة اليدوية لا تُوثَّق إلا إذا كان الجهاز ظاهرًا في الشبكة، ومفتاحه مرتبط بالمعرّف،
+            // والبصمة المكتوبة تطابق البصمة الفعلية. وإلا لا يُسجَّل أي توثيق.
+            val np = nearbyPeers.value.firstOrNull { it.peerId.equals(cleanId, ignoreCase = true) } ?: return
+            if (np.publicKeyHex.length != 64 ||
+                !cryptoManager.verifyNodeIdMatchesPublicKey(cleanId, np.publicKeyHex)
+            ) return
+            fun norm(x: String) = x.filter { it.isLetterOrDigit() }.uppercase()
+            if (norm(cleanFp).isEmpty() || norm(cleanFp) == norm(cleanId) || norm(cleanFp) != norm(np.fingerprint)) return
+            resolvedPubKey = np.publicKeyHex
+            if (resolvedXKey.length != 64) resolvedXKey = np.x25519PublicKeyHex
+            cleanFp = np.fingerprint.trim().uppercase()
+        }
         scope.launch {
-            contactsManager.verifyContact(cleanId, cleanName, cleanFp, publicKeyHex, resolvedXKey)
+            contactsManager.verifyContact(cleanId, cleanName, cleanFp, resolvedPubKey, resolvedXKey)
             val existingConv = db.conversationDao().getById(cleanId)
             val readyText = com.example.ui.stringsFor(_language.value).chatsReadyToMessage
             db.conversationDao().upsert(
@@ -910,8 +928,8 @@ class MeshRepository private constructor(private val context: Context) {
                 )
             )
             bleEngine.refreshPeersFromContacts()
-            if (resolvedXKey.length == 64) {
-                flushPendingDirectMessages(cleanId, resolvedXKey)
+            if (resolvedXKey.length == 64 && !directSessions.hasSession(cleanId)) {
+                ensureDirectSession(cleanId)
             }
         }
     }
@@ -996,6 +1014,7 @@ class MeshRepository private constructor(private val context: Context) {
         _mediaTransferProgress.value = emptyMap()
         channelPassphrases.clear()
         pendingDirectPayloads.clear()
+        directSessions.clearAll()
         scope.launch {
             db.messageDao().deleteAll()
             db.conversationDao().deleteAll()
@@ -1016,14 +1035,61 @@ class MeshRepository private constructor(private val context: Context) {
         }
     }
 
-    private fun buildChatAad(chatId: String, isChannel: Boolean, myNodeId: String): ByteArray {
+    private fun buildChatAad(
+        chatId: String,
+        isChannel: Boolean,
+        myNodeId: String,
+        sid: String = "",
+        n: Int = -1
+    ): ByteArray {
         val contextTag = if (isChannel) {
             "CH:${chatId.trim()}"
         } else {
             val pair = listOf(myNodeId.trim(), chatId.trim()).sorted()
-            "DM:${pair[0]}:${pair[1]}"
+            // sid/n مرتبطان بالتشفير: أي تلاعب بهما يُبطل الوسم
+            "DM:${pair[0]}:${pair[1]}:$sid:$n"
         }
         return contextTag.toByteArray(Charsets.UTF_8)
+    }
+
+    /** مفتاح الإرسال: للقنوات مفتاح القناة، وللمحادثات المباشرة مفتاح رسالة من جلسة سرية مستقبلية. */
+    private suspend fun resolveSendKey(chatId: String, isChannel: Boolean): SendKey? {
+        if (isChannel) {
+            return SendKey("", -1, cryptoManager.deriveChannelKey(chatId, channelPassphrases[chatId] ?: ""))
+        }
+        val key = directSessions.nextSendKey(chatId)
+        if (key != null && directSessions.needsRotation(chatId)) ensureDirectSession(chatId)
+        return key
+    }
+
+    /** يبدأ مصافحة جلسة جديدة مع الطرف (إن عُرف مفتاحه) ويطلب الإعلان عن الهوية. */
+    private fun ensureDirectSession(peerId: String) {
+        bleEngine.requestKeyHandshake()
+        scope.launch {
+            val x = resolvePeerXKey(peerId)
+            if (x.length == 64) startHandshake(peerId, x)
+        }
+    }
+
+    private fun startHandshake(peerId: String, peerXHex: String) {
+        val payload = directSessions.beginHandshake(peerId, peerXHex) ?: return
+        val packet = signedPacket(
+            type = MeshPacketType.SESSION_INIT,
+            targetId = peerId,
+            isChannel = false,
+            payload = payload,
+            timestamp = System.currentTimeMillis()
+        )
+        bleEngine.broadcastPacket(packet)
+    }
+
+    /** عُرف مفتاح طرف: إن كانت لدينا رسائل معلّقة له ولا جلسة، ابدأ المصافحة. */
+    private fun onPeerKeyKnown(peerId: String, x25519KeyHex: String) {
+        if (directSessions.hasSession(peerId)) {
+            flushPendingDirectMessages(peerId)
+            return
+        }
+        if (!pendingDirectPayloads[peerId].isNullOrEmpty()) startHandshake(peerId, x25519KeyHex)
     }
 
     private suspend fun sendEncryptedTextPacket(
@@ -1032,15 +1098,19 @@ class MeshRepository private constructor(private val context: Context) {
         msgId: String,
         plaintext: String,
         replyPreview: String?,
-        keyBytes: ByteArray,
+        send: SendKey,
         timestamp: Long
     ) {
-        val aad = buildChatAad(chatId, isChannel, _identity.value.nodeId)
-        val encryptedText = cryptoManager.encryptTextWithKey(keyBytes, plaintext, aad)
+        val aad = buildChatAad(chatId, isChannel, _identity.value.nodeId, send.sid, send.n)
+        val encryptedText = runCatching { cryptoManager.encryptTextWithKey(send.key, plaintext, aad) }.getOrNull() ?: return // لا إرسال بدون تشفير
         val payloadObj = JSONObject().apply {
             put("msgId", msgId)
             put("chatId", chatId)
             put("body", encryptedText)
+            if (send.n >= 0) {
+                put("sid", send.sid)
+                put("n", send.n)
+            }
             if (replyPreview != null) put("reply", replyPreview)
         }
         val packet = signedPacket(
@@ -1065,11 +1135,11 @@ class MeshRepository private constructor(private val context: Context) {
         label: String,
         durationSec: Int,
         rawB64: String,
-        keyBytes: ByteArray,
+        send: SendKey,
         timestamp: Long
     ) {
-        val aad = buildChatAad(chatId, isChannel, _identity.value.nodeId)
-        val encMedia = cryptoManager.encryptTextWithKey(keyBytes, rawB64, aad)
+        val aad = buildChatAad(chatId, isChannel, _identity.value.nodeId, send.sid, send.n)
+        val encMedia = runCatching { cryptoManager.encryptTextWithKey(send.key, rawB64, aad) }.getOrNull() ?: return // لا إرسال بدون تشفير
         if (encMedia.length <= MediaChunkAssembler.CHUNK_SIZE_CHARS) {
             val payloadObj = JSONObject().apply {
                 put("msgId", msgId)
@@ -1078,6 +1148,10 @@ class MeshRepository private constructor(private val context: Context) {
                 put("label", label)
                 put("dur", durationSec)
                 put("data", encMedia)
+                if (send.n >= 0) {
+                    put("sid", send.sid)
+                    put("n", send.n)
+                }
             }
             bleEngine.broadcastPacket(
                 signedPacket(
@@ -1104,6 +1178,10 @@ class MeshRepository private constructor(private val context: Context) {
                     put("total", total)
                     put("crc", crc32)
                     put("chunk", chunkStr)
+                    if (send.n >= 0) {
+                        put("sid", send.sid)
+                        put("n", send.n)
+                    }
                 }
                 bleEngine.broadcastPacket(
                     signedPacket(
@@ -1143,11 +1221,16 @@ class MeshRepository private constructor(private val context: Context) {
         list.add(item)
     }
 
-    private fun flushPendingDirectMessages(peerId: String, x25519KeyHex: String) {
+    private fun flushPendingDirectMessages(peerId: String) {
+        if (!directSessions.hasSession(peerId)) return
         val pending = pendingDirectPayloads.remove(peerId) ?: return
-        val keyBytes = cryptoManager.deriveDirectKeyWithPeer(x25519KeyHex) ?: return
         scope.launch {
-            pending.forEach { item ->
+            pending.toList().forEach { item ->
+                val send = directSessions.nextSendKey(peerId)
+                if (send == null) {
+                    queuePendingDirectItem(peerId, item)
+                    return@forEach
+                }
                 if (item.packetType == MeshPacketType.CHAT_TEXT) {
                     sendEncryptedTextPacket(
                         chatId = peerId,
@@ -1155,7 +1238,7 @@ class MeshRepository private constructor(private val context: Context) {
                         msgId = item.msgId,
                         plaintext = item.plaintext,
                         replyPreview = item.replyPreview,
-                        keyBytes = keyBytes,
+                        send = send,
                         timestamp = item.timestamp
                     )
                 } else if (item.packetType == MeshPacketType.CHAT_MEDIA && item.mediaType != null) {
@@ -1167,7 +1250,7 @@ class MeshRepository private constructor(private val context: Context) {
                         label = item.mediaLabel.orEmpty(),
                         durationSec = item.voiceDurationSec,
                         rawB64 = item.plaintext,
-                        keyBytes = keyBytes,
+                        send = send,
                         timestamp = item.timestamp
                     )
                 }
@@ -1282,15 +1365,22 @@ class MeshRepository private constructor(private val context: Context) {
                 val msgId = obj.optString("msgId").take(64)
                 if (msgId.isBlank()) return
                 val chatId = if (packet.isChannel) packet.targetId else packet.senderId
+                val sid = obj.optString("sid")
+                val n = obj.optInt("n", -1)
                 val keyBytes = if (packet.isChannel) {
                     cryptoManager.deriveChannelKey(chatId, channelPassphrases[chatId] ?: "")
                 } else {
-                    resolveDirectKey(packet.senderId, packet.senderX25519KeyHex)
+                    directSessions.recvKey(packet.senderId, sid, n)
                 }
-                val aad = buildChatAad(chatId, packet.isChannel, me.nodeId)
-                val decrypted = keyBytes?.let {
+                val aad = buildChatAad(chatId, packet.isChannel, me.nodeId, sid, n)
+                val decryptedOrNull = keyBytes?.let {
                     cryptoManager.decryptTextWithKey(it, obj.optString("body"), aad)
                 }?.take(4000)
+                if (decryptedOrNull == null && !packet.isChannel) {
+                    // لا جلسة لدينا (أُعيد تشغيل التطبيق/ضاعت الحالة): ابدأ مصافحة جديدة ليتمكن الطرف من إعادة الإرسال
+                    trustedStaticKeyOf(packet)?.let { startHandshake(packet.senderId, it) }
+                }
+                val decrypted = decryptedOrNull
                     ?: "🔒 رسالة مشفرة (يتعذر فك التشفير بدون المفتاح/كلمة المرور)"
                 val reply = obj.optString("reply").take(160).takeIf { it.isNotBlank() }
 
@@ -1338,7 +1428,8 @@ class MeshRepository private constructor(private val context: Context) {
                         memberNickname = packet.senderName.take(32),
                         seenAt = packet.timestamp
                     )
-                } else {
+                } else if (decryptedOrNull != null) {
+                    // FIX: لا نُرسل إيصال تسليم لرسالة تعذّر فك تشفيرها (كان المرسل يرى «تم التسليم» خطأً)
                     sendDeliveryAck(packet.senderId, msgId)
                 }
             }
@@ -1360,7 +1451,9 @@ class MeshRepository private constructor(private val context: Context) {
                     mediaType = mediaType,
                     labelHint = labelHint,
                     dur = dur,
-                    encData = encData
+                    encData = encData,
+                    sid = obj.optString("sid"),
+                    n = obj.optInt("n", -1)
                 )
             }
 
@@ -1389,7 +1482,9 @@ class MeshRepository private constructor(private val context: Context) {
                             mediaType = obj.optString("mediaType", "IMAGE"),
                             labelHint = obj.optString("label", "وسائط واردة عبر Mesh").take(80),
                             dur = obj.optInt("dur", 1).coerceIn(1, 300),
-                            encData = res.fullData
+                            encData = res.fullData,
+                            sid = obj.optString("sid"),
+                            n = obj.optInt("n", -1)
                         )
                     }
                     MediaChunkAssembler.AssemblyResult.Corrupted,
@@ -1474,6 +1569,32 @@ class MeshRepository private constructor(private val context: Context) {
                 }
             }
 
+            MeshPacketType.SESSION_INIT -> {
+                if (packet.isChannel || packet.targetId != me.nodeId) return
+                if (System.currentTimeMillis() - packet.timestamp > HANDSHAKE_MAX_AGE_MS) return
+                val peerX = trustedStaticKeyOf(packet) ?: return
+                val resp = directSessions.acceptInit(packet.senderId, peerX, packet.payload) ?: return
+                bleEngine.broadcastPacket(
+                    signedPacket(
+                        type = MeshPacketType.SESSION_RESP,
+                        targetId = packet.senderId,
+                        isChannel = false,
+                        payload = resp,
+                        timestamp = System.currentTimeMillis()
+                    )
+                )
+                flushPendingDirectMessages(packet.senderId)
+            }
+
+            MeshPacketType.SESSION_RESP -> {
+                if (packet.isChannel || packet.targetId != me.nodeId) return
+                if (System.currentTimeMillis() - packet.timestamp > HANDSHAKE_MAX_AGE_MS) return
+                val peerX = trustedStaticKeyOf(packet) ?: return
+                if (directSessions.completeHandshake(packet.senderId, peerX, packet.payload)) {
+                    flushPendingDirectMessages(packet.senderId)
+                }
+            }
+
             MeshPacketType.PEER_HELLO,
             MeshPacketType.NODE_ANNOUNCE -> Unit
         }
@@ -1486,16 +1607,22 @@ class MeshRepository private constructor(private val context: Context) {
         mediaType: String,
         labelHint: String,
         dur: Int,
-        encData: String
+        encData: String,
+        sid: String,
+        n: Int
     ) {
         val me = _identity.value
         val keyBytes = if (packet.isChannel) {
             cryptoManager.deriveChannelKey(chatId, channelPassphrases[chatId] ?: "")
         } else {
-            resolveDirectKey(packet.senderId, packet.senderX25519KeyHex)
+            directSessions.recvKey(packet.senderId, sid, n)
         }
-        val aad = buildChatAad(chatId, packet.isChannel, me.nodeId)
-        val decB64 = keyBytes?.let { cryptoManager.decryptTextWithKey(it, encData, aad) } ?: return
+        val aad = buildChatAad(chatId, packet.isChannel, me.nodeId, sid, n)
+        val decB64 = keyBytes?.let { cryptoManager.decryptTextWithKey(it, encData, aad) }
+        if (decB64 == null) {
+            if (!packet.isChannel) trustedStaticKeyOf(packet)?.let { startHandshake(packet.senderId, it) }
+            return
+        }
 
         if (mediaType == "VOICE") {
             val savedPath = mediaHelper.saveBase64ToVoiceFile(decB64) ?: return
@@ -1627,14 +1754,23 @@ class MeshRepository private constructor(private val context: Context) {
         bleEngine.broadcastPacket(ack, cacheForStoreAndForward = true)
     }
 
-    private suspend fun resolveDirectKey(peerId: String, inlineXKey: String = ""): ByteArray? {
+    private suspend fun resolvePeerXKey(peerId: String, inlineXKey: String = ""): String {
         val xKey = inlineXKey.ifBlank {
             bleEngine.getPeerX25519Key(peerId)
                 ?: contactsManager.getContact(peerId)?.x25519PublicKeyHex?.takeIf { it.length == 64 }
                 ?: db.conversationDao().getById(peerId)?.peerX25519KeyHex
                 ?: ""
         }
-        return if (xKey.length == 64) cryptoManager.deriveDirectKeyWithPeer(xKey) else null
+        return if (xKey.length == 64) xKey else ""
+    }
+
+    /** مفتاح X25519 الثابت الموقَّع في الحزمة، مع رفضه إن خالف المفتاح المثبّت لجهة اتصال موثّقة. */
+    private fun trustedStaticKeyOf(packet: MeshPacket): String? {
+        val x = packet.senderX25519KeyHex
+        if (x.length != 64) return null
+        val pinned = contactsManager.getContact(packet.senderId)?.x25519PublicKeyHex
+        if (!pinned.isNullOrBlank() && pinned.length == 64 && !pinned.equals(x, ignoreCase = true)) return null
+        return x
     }
 
     private suspend fun updateConversationPreview(
@@ -1741,6 +1877,8 @@ class MeshRepository private constructor(private val context: Context) {
     )
 
     companion object {
+        private const val HANDSHAKE_MAX_AGE_MS = 15 * 60_000L
+
         @Volatile
         private var INSTANCE: MeshRepository? = null
 

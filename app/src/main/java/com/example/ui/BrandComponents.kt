@@ -4,6 +4,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,6 +14,8 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -44,10 +48,65 @@ import com.example.ui.theme.MeshViolet
 import com.example.ui.theme.NearbyCyanTeal
 import com.example.ui.theme.PrivateShieldGold
 
+/** Hairline outline used by cards, inputs and media (flat feed look). */
 @Composable
 fun locChatRimBorder(): BorderStroke {
-    val brush = if (isSystemInDarkTheme()) LocChatRimBorderDark else LocChatRimBorderLight
-    return BorderStroke(1.dp, brush)
+    return BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline)
+}
+
+/** Thin full-width divider between feed rows and around bars. */
+@Composable
+fun FeedDivider(modifier: Modifier = Modifier) {
+    HorizontalDivider(
+        modifier = modifier,
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outline
+    )
+}
+
+/**
+ * Round avatar with the person's initial (or a # glyph for channels).
+ * With [ring] = true it gets the brand-gradient "story" ring.
+ */
+@Composable
+fun LocChatAvatar(
+    label: String,
+    size: Dp,
+    modifier: Modifier = Modifier,
+    isChannel: Boolean = false,
+    ring: Boolean = false,
+    onClick: (() -> Unit)? = null
+) {
+    val initial = label.trim().trimStart('#').take(1).uppercase().ifEmpty { "?" }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(size)
+            .then(if (ring) Modifier.border(2.5.dp, LocChatBrandGradient, CircleShape) else Modifier)
+            .padding(if (ring) 4.dp else 0.dp)
+            .clip(CircleShape)
+            .then(
+                if (isChannel) Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                else Modifier.background(LocChatBrandGradient)
+            )
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+    ) {
+        if (isChannel) {
+            Icon(
+                imageVector = Icons.Default.Tag,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(size * 0.45f)
+            )
+        } else {
+            Text(
+                text = initial,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = (size.value * 0.42f).sp
+            )
+        }
+    }
 }
 
 @Composable
